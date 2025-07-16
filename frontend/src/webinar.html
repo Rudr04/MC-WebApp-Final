@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CosmoGuru - Live Stream Platform</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="../public/styles/webinar.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <div class="logo">
+        <img src="../public/assets/images/CG_App_Icon.png" alt="Cosmo" class="logo-symbol">
+        <span style="color: var(--accent-color);">MasterClass</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-container">
+    <section class="stream-section">
+      <div class="player-wrapper" id="playerContainer">
+        <div id="player"></div>
+        <div class="player-overlay"></div>
+        <div class="loading-indicator" id="loadingIndicator">
+          <div class="spinner"></div>
+        </div>
+        <div class="error-message" id="errorMessage">
+          <i class="fas fa-exclamation-triangle"></i>
+          <div>Stream temporarily unavailable</div>
+          <button class="control-btn" onclick="streamManager.retry()">
+            <i class="fas fa-redo"></i> Retry
+          </button>
+        </div>
+        <div class="player-controls">
+          <div class="control-group">
+            <button class="control-btn" id="muteBtn">
+              <i class="fas fa-volume-mute"></i>
+              Unmute
+            </button>
+            <button class="control-btn" id="qualityBtn">
+              <i class="fas fa-cog"></i>
+              Quality
+            </button>
+          </div>
+          <div class="control-group">
+            <button class="control-btn" id="fullscreenBtn">
+              <i class="fas fa-expand"></i>
+              Fullscreen
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chat-container">
+      <div class="chat-header">
+        <div class="chat-title">
+          <i class="fas fa-comments"></i>
+          Live Chat
+        </div>
+        <div class="participant-count" id="participantCount">
+          <i class="fas fa-users"></i>
+          <span id="participantNumber">0</span>
+        </div>
+      </div>
+      
+      <div class="recipient-selector" id="recipientSelector" style="display: none;">
+        <select id="recipientSelect">
+          <option value="all">All Participants</option>
+        </select>
+      </div>
+      
+      <div class="chat-messages" id="chatMessages">
+        <div id="messagesList"></div>
+      </div>
+
+      <input type="text" id="messageInput" class="message-input" placeholder="Type your message..." maxlength="500">
+      
+      <div class="message-input-container">
+        <button class="send-btn">
+          <i class="fas fa-paper-plane"></i>
+          Send
+        </button>
+        <button class="exit-btn">
+          <i class="fas fa-sign-out-alt"></i>
+          Exit
+        </button>
+        <button class="end-btn" id="endSessionBtn" style="display: none;">
+          <i class="fas fa-power-off"></i>
+          End
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <div class="connection-status connected" id="connectionStatus">
+    <i class="fas fa-wifi"></i>
+    <span>Connected</span>
+  </div>
+
+  <!-- Firebase SDK (Only for realtime database listener) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  
+  <!-- Application Scripts -->
+  <script src="js/api/endpoints.js"></script>
+  <script src="js/api/apiClient.js"></script>
+  <script src="js/utils/helpers.js"></script>
+  <script src="js/webinar/streamPlayer.js"></script>
+  <script src="js/webinar/chatManager.js"></script>
+  <script src="js/webinar.js"></script>
+</body>
+</html>
