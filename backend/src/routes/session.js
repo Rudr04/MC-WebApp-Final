@@ -17,7 +17,7 @@ router.get('/count', async (req, res, next) => {
 // End session (host only)
 router.post('/end', verifyToken, verifyHost, async (req, res, next) => {
   try {
-    await sessionService.endSession(req.user.uid);
+    await sessionService.endSession(req.user.email);
     res.json({ message: 'Session ended successfully' });
   } catch (error) {
     next(error);

@@ -1,3 +1,4 @@
+const { FIREBASE_PATHS } = require('../config/constants');
 const { db } = require('../config/firebase');
 const { logger } = require('../utils/logger');
 
@@ -17,13 +18,12 @@ class SessionService {
     logger.info(`Ending session by host: ${hostId}`);
     
     // Set session ended flag
-    await db.ref('sessionEnded').set(true);
+    await db.ref(FIREBASE_PATHS.SESSION_ENDED).set(true);
     
     // Clear all sessions
     await Promise.all([
-      db.ref('activeSessions').remove(),
-      db.ref('activeHosts').remove(),
-      db.ref('activeCoHosts').remove()
+      db.ref(FIREBASE_PATHS.ACTIVE_SESSIONS).remove(),
+      db.ref(FIREBASE_PATHS.ACTIVE_HOSTS).remove(),
     ]);
 
     logger.info('Session ended successfully');

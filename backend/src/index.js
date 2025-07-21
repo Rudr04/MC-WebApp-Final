@@ -30,7 +30,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Apply general rate limiting to all API routes
-app.use('/api/', generalApiLimiter);
+// app.use('/api/', generalApiLimiter);
 
 // Health check endpoint (no rate limiting)
 app.get('/health', (req, res) => {

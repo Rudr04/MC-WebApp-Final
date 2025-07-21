@@ -19,7 +19,7 @@ module.exports = {
   FIREBASE_PATHS: {
     WHITELIST: 'whitelist',
     ACTIVE_HOSTS: 'activeHosts',
-    ACTIVE_CO_HOSTS: 'activeCoHosts',
+    ACTIVE_HOST_COUNT: 'activeHostCount',
     ACTIVE_SESSIONS: 'activeSessions',
     USERS: 'users',
     MESSAGES: 'messages',

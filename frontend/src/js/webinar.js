@@ -4,8 +4,12 @@ class WebinarApp {
   }
 
   async initialize() {
+    console.log('Starting webinar initialization...');
+
     // Check authentication
     const userStr = sessionStorage.getItem('user');
+    console.log('User from session:', userStr ? 'Found' : 'Not found');
+
     if (!userStr) {
       location.href = 'login.html';
       return;
@@ -13,19 +17,41 @@ class WebinarApp {
     
     try {
       this.user = JSON.parse(userStr);
+      console.log('Parsed user:', this.user);
 
-      // Log token details
+      // Check if we have a token
       const token = localStorage.getItem('webinar_token');
-      if (token) {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        console.log('Token expires at:', new Date(payload.exp * 1000));
-        console.log('Current time:', new Date());
-      }
-      
+      console.log('JWT token:', token ? 'Found' : 'Not found');
+
       // Verify session with backend
+      console.log('Calling verify session...');
       const response = await apiClient.verifySession();
-      if (!response.valid) throw new Error('Invalid session');
-      console.log('Session verification response:', response);
+      console.log('Verify response:', response);
+      
+      if (!response.valid) {
+        console.error('Session invalid in response');
+        throw new Error('Invalid session');
+      }
+
+      // Initialize Firebase Auth Manager
+      window.firebaseAuthManager.initialize();
+
+      // Authenticate with Firebase if we have a token
+      if (response.firebaseToken) {
+        try {
+          await firebaseAuthManager.authenticate(response.firebaseToken);
+          console.log('Firebase RTDB authenticated successfully');
+        } catch (error) {
+          console.error('Firebase auth failed, continuing without RTDB:', error);
+        }
+      } else {
+        console.warn('No Firebase token in verify response');
+        // Try stored token as fallback
+        const success = await firebaseAuthManager.tryReauthenticate();
+        if (!success) {
+          console.warn('Could not authenticate with Firebase RTDB');
+        }
+      }
       
       // Initialize components
       await streamPlayer.initialize();
@@ -42,11 +68,20 @@ class WebinarApp {
       // Watch for session end
       this.watchForSessionEnd();
       
-    } catch (error) {
-      console.error('Initialization error:', error);
-      alert('Session expired. Please login again.');
-      location.href = 'login.html';
-    }
+    }catch (error) {
+        console.error('Initialization error:', error);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        
+        // Only show alert and redirect if it's actually a session error
+        if (error.message && error.message.includes('session')) {
+          alert('Session expired. Please login again.');
+          location.href = 'login.html';
+        } else {
+          // For other errors, log but don't redirect
+          console.error('Non-session error during initialization:', error);
+        }
+      }
   }
 
   setupEventListeners() {
@@ -110,16 +145,19 @@ class WebinarApp {
   }
 
   watchForSessionEnd() {
-    if (chatManager?.firebase) {
-      chatManager.firebase.ref('sessionEnded').on('value', (snapshot) => {
-        console.log('sessionEnded flag changed to:', snapshot.val());
-        if (snapshot.val() === true) {
-          console.log('Session ended by host - this is why you\'re being logged out');
-          streamPlayer.showNotification('Session ended by host', 'error');
-          setTimeout(() => this.logout(), 2000);
-        }
-      });
-    }
+    // Use authenticated Firebase instance
+    const sessionEndedRef = firebase.database().ref('sessionEnded');
+    
+    sessionEndedRef.on('value', (snapshot) => {
+      console.log('sessionEnded flag changed to:', snapshot.val());
+      if (snapshot.val() === true) {
+        console.log('Session ended by host');
+        streamPlayer.showNotification('Session ended by host', 'error');
+        setTimeout(() => this.logout(), 2000);
+      }
+    }, (error) => {
+      console.error('Error watching session end:', error);
+    });
   }
 
   async logout() {
@@ -134,6 +172,9 @@ class WebinarApp {
   }
 
   async endSession() {
+    console.log('End session called');
+    console.log('User role:', this.user.role);
+    
     if (this.user.role !== 'host') {
       streamPlayer.showNotification('Only hosts can end sessions', 'error');
       return;
@@ -142,10 +183,14 @@ class WebinarApp {
     if (!confirm('End session for all participants?')) return;
     
     try {
+      console.log('Calling API to end session...');
       await apiClient.endSession();
+      console.log('API call successful');
       streamPlayer.showNotification('Session ended', 'success');
       setTimeout(() => this.logout(), 1000);
     } catch (error) {
+      console.error('End session error:', error);
+      console.error('Error message:', error.message);
       streamPlayer.showNotification('Failed to end session', 'error');
     }
   }

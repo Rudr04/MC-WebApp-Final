@@ -9,15 +9,12 @@ class ChatManager {
     this.currentUser = user;
     
     // Initialize Firebase for realtime database only
-    const firebaseConfig = {
-      databaseURL: "https://cosmoguru-server-default-rtdb.firebaseio.com"
-    };
-    
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
-    
     this.firebase = firebase.database();
+  
+    // Check if Firebase is authenticated
+    if (!firebaseAuthManager.isAuthenticated) {
+      console.warn('Firebase not authenticated, chat features may be limited');
+    }
     this.messagesRef = this.firebase.ref('messages');
     
     // Set up listeners
@@ -112,33 +109,36 @@ class ChatManager {
   }
 
   async updateParticipantCount() {
-    try {
-      const response = await apiClient.getSessionCount();
-      console.log('geting participant count');
-      document.getElementById('participantNumber').textContent = response.count;
-    } catch (error) {
-      console.error('Failed to get participant count:', error);
-    }
+    const activeSessionsRef = this.firebase.ref('activeSessions');
     
-    // Update every 10 seconds
-    setTimeout(() => this.updateParticipantCount(), 10000);
+    activeSessionsRef.on('value', (snapshot) => {
+      const count = snapshot.numChildren();
+      document.getElementById('participantNumber').textContent = count;
+    });
   }
 
   async loadParticipantsList() {
-    try {
-      const response = await apiClient.getParticipants();
-      const select = document.getElementById('recipientSelect');
+    // Use real-time listener for users
+    const usersRef = this.firebase.ref('users');
+    
+    usersRef.on('value', (snapshot) => {
+      const participants = [];
+      snapshot.forEach(child => {
+        const data = child.val();
+        if (data.role === 'participant') {
+          participants.push({
+            id: child.key,
+            name: data.name,
+          });
+        }
+      });
       
+      const select = document.getElementById('recipientSelect');
       select.innerHTML = '<option value="all">All Participants</option>';
-      response.participants.forEach(participant => {
+      participants.forEach(participant => {
         select.innerHTML += `<option value="${participant.id}">${participant.name}</option>`;
       });
-    } catch (error) {
-      console.error('Failed to load participants:', error);
-    }
-    
-    // Reload every 30 seconds
-    setTimeout(() => this.loadParticipantsList(), 30000);
+    });
   }
 
   showNotification(message, type) {

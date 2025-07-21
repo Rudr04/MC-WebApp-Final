@@ -9,6 +9,10 @@ class ApiClient {
     return localStorage.getItem('webinar_token');
   }
 
+  get firebaseToken() {
+    return sessionStorage.getItem('firebase_token');
+  }
+
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
     
@@ -22,7 +26,7 @@ class ApiClient {
 
     // Add auth token if available
     const isLoginEndpoint = endpoint.includes('/auth/host/login') || 
-                           endpoint.includes('/auth/participant/login');
+                            endpoint.includes('/auth/participant/login');
     
     const currentToken = this.token; // Use getter
     
@@ -58,8 +62,16 @@ class ApiClient {
     }
   }
 
+  setFirebaseToken(token) {
+    if (token) {
+      sessionStorage.setItem('firebase_token', token);
+      console.log('Firebase token stored successfully');
+    }
+  }
+
   clearToken() {
     localStorage.removeItem('webinar_token');
+    sessionStorage.removeItem('firebase_token');
   }
 
   // Auth endpoints
@@ -74,6 +86,10 @@ class ApiClient {
     
     if (response.token) {
       this.setToken(response.token);
+    }
+
+    if (response.firebaseToken) {
+      this.setFirebaseToken(response.firebaseToken);
     }
     
     return response;
@@ -91,6 +107,9 @@ class ApiClient {
       console.log('Participant token set:', response.token.substring(0, 20) + '...');
     } else {
       console.error('WARNING: No token in participant login response');
+    }
+    if (response.firebaseToken) {
+      this.setFirebaseToken(response.firebaseToken);
     }
     
     return response;
