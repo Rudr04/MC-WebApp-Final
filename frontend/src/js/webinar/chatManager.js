@@ -3,10 +3,14 @@ class ChatManager {
     this.firebase = null;
     this.messagesRef = null;
     this.currentUser = null;
+    this.uiPermissions = null;
+    this.sending = null;
+    this.participantsMap = new Map();
   }
 
-  initialize(user) {
+  initialize(user, uiPermissions = {}) {
     this.currentUser = user;
+    this.uiPermissions = uiPermissions;
     
     // Initialize Firebase for realtime database only
     this.firebase = firebase.database();
@@ -21,11 +25,25 @@ class ChatManager {
     this.setupMessageListener();
     this.updateParticipantCount();
     
-    // Load participants if host
-    if (this.currentUser.role === 'host' || this.currentUser.role === 'co-host') {
+    // Load participants if user has recipient selection permissions
+    if (this.uiPermissions.canSelectRecipients) {
       this.loadParticipantsList();
-      document.getElementById('recipientSelector').style.display = 'block';
+      // Check if recipientSelector exists (might be injected after this call)
+      const recipientSelector = document.getElementById('recipientSelector');
+      if (recipientSelector) {
+        recipientSelector.style.display = 'block';
+      }
     }
+  }
+
+  getParticipantName(phoneOrId) {
+    if (phoneOrId === 'all') return 'All';
+    if (phoneOrId === 'host') return 'Host';
+    if (phoneOrId === this.currentUser.phone) return 'You';
+    
+    // Try to get name from participants map
+    const name = this.participantsMap.get(phoneOrId);
+    return name || phoneOrId; // Return phone if name not found
   }
 
   setupMessageListener() {
@@ -36,32 +54,76 @@ class ChatManager {
       // Filter messages for participants
       if (this.currentUser.role === 'participant') {
         const shouldShow = message.to === 'all' ||
-                          message.to === this.currentUser.phone ||
-                          message.fromId === this.currentUser.phone;
+                           message.to === this.currentUser.phone ||
+                           message.fromId === this.currentUser.phone;
         if (!shouldShow) return;
       }
       
-      this.displayMessage(message);
+      this.displayMessage(message); 
     });
+  }
+
+  selectParticipant(participantPhone) {
+    const select = document.getElementById('recipientSelect');
+    
+    // Find and select the option by phone number
+    for (let option of select.options) {
+      if (option.value === participantPhone) {
+        option.selected = true;
+        // Visual feedback
+        this.showNotification(`Selected: ${option.text}`, 'success');
+        
+        // Optionally scroll to the input
+        document.getElementById('messageInput').focus();
+        break;
+      }
+    }
   }
 
   displayMessage(message) {
     const messagesList = document.getElementById('messagesList');
     const messageEl = document.createElement('div');
     
+    // Extract role and name from "from" field (e.g., "participant:Rudr Bhatt")
+    const [senderRole, ...senderNameParts] = message.from.split(':');
+    const senderName = senderNameParts.join(':') || 'Unknown';
     const isHost = message.from.startsWith('host:') || message.from.startsWith('co-host:');
     const isPrivate = message.to !== 'all';
-    const senderName = message.from.split(':')[1] || 'Unknown';
+    const senderId = message.fromId; // Phone number of sender
     
+    // Get recipient display name
+    const recipientDisplay = this.getParticipantName(message.to);
+
     messageEl.className = `message ${isHost ? 'host' : 'participant'} ${isPrivate ? 'private' : ''}`;
-    messageEl.innerHTML = `
+
+    // Create clickable sender only for users with recipient selection permissions
+    const canClickSender = this.uiPermissions.canSelectRecipients 
+                          && senderId !== this.currentUser.phone;
+    
+    const senderElement = canClickSender
+      ? `<span class="clickable-sender" data-sender-id="${senderId}" style="cursor: pointer;">
+          <i class="fas fa-${isHost ? 'crown' : 'user'}"></i>
+          ${senderName}
+        </span>`
+      : `<i class="fas fa-${isHost ? 'crown' : 'user'}"></i> ${senderName}`;
+
+      messageEl.innerHTML = `
       <div class="message-sender">
-        <i class="fas fa-${isHost ? 'crown' : 'user'}"></i>
-        ${senderName}
-        ${isPrivate ? `→ ${message.to === this.currentUser.phone ? 'You' : message.to}` : ''}
+        ${senderElement}
+        ${isPrivate ? `→ ${recipientDisplay}` : ''}
       </div>
       <div class="message-text">${this.linkify(message.text)}</div>
     `;
+
+     // Add click handler for clickable senders
+    if (canClickSender) {
+      const clickableSender = messageEl.querySelector('.clickable-sender');
+      if (clickableSender) {
+        clickableSender.addEventListener('click', () => {
+          this.selectParticipant(clickableSender.dataset.senderId);
+        });
+      }
+    }
     
     messagesList.appendChild(messageEl);
     
@@ -88,16 +150,23 @@ class ChatManager {
   }
 
   async sendMessage() {
+    if (this.sending) return; // prevent spam
+    this.sending = true;
+
     const input = document.getElementById('messageInput');
     const message = input.value.trim();
     
     if (!message) {
       this.showNotification('Please enter a message', 'warning');
+      this.sending=false;
       return;
     }
     
-    const recipient = (this.currentUser.role === 'host' || this.currentUser.role === 'co-host') ? 
-      document.getElementById('recipientSelect').value : 'host';
+    let recipient = 'host'; // Default for participants
+    if (this.uiPermissions.canSelectRecipients) {
+      const recipientSelect = document.getElementById('recipientSelect');
+      recipient = recipientSelect ? recipientSelect.value : 'all';
+    }
     
     try {
       await apiClient.sendMessage(message, recipient);
@@ -105,6 +174,8 @@ class ChatManager {
       input.focus();
     } catch (error) {
       this.showNotification('Failed to send message', 'error');
+    } finally {
+      this.sending=false;
     }
   }
 
@@ -134,10 +205,12 @@ class ChatManager {
       });
       
       const select = document.getElementById('recipientSelect');
-      select.innerHTML = '<option value="all">All Participants</option>';
-      participants.forEach(participant => {
-        select.innerHTML += `<option value="${participant.id}">${participant.name}</option>`;
-      });
+      if (select) {
+        select.innerHTML = '<option value="all">All Participants</option>';
+        participants.forEach(participant => {
+          select.innerHTML += `<option value="${participant.id}">${participant.name}</option>`;
+        });
+      }
     });
   }
 

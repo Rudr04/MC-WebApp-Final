@@ -1,14 +1,16 @@
 const express = require('express');
 const authService = require('../services/authService');
-const { verifyFirebaseToken } = require('../middleware/auth');
+const { verifyFirebaseToken, verifyToken } = require('../middleware/auth');
 const { validateParticipantLogin } = require('../utils/validator');
 const { authLimiter, participantJoinLimiter } = require('../middleware/rateLimit');
-const { MESSAGES, HTTP_STATUS } = require('../config/constants');
+const { MESSAGES, HTTP_STATUS, ROLES } = require('../config/constants');
 
 const router = express.Router();
 
 // Host login with rate limiting
-router.post('/host/login', verifyFirebaseToken, async (req, res, next) => {
+router.post('/host/login',
+  verifyFirebaseToken,
+  async (req, res, next) => {
   try {
     const result = await authService.authenticateHost(req.firebaseUser);
     res.json({
@@ -37,11 +39,22 @@ router.post('/participant/login',
 });
 
 // Verify session
-router.get('/verify', async (req, res, next) => {
+router.get('/verify', verifyToken, async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
-    const result = await authService.verifySession(token);
-    res.json(result);
+    const result = await authService.verifySession(req.headers.authorization?.split(' ')[1]);
+    
+    // Generate UI permissions based on user role
+    const uiPermissions = {
+      canEndSession: req.user.role === ROLES.HOST,
+      canSelectRecipients: req.user.role === ROLES.HOST || req.user.role === ROLES.CO_HOST,
+      canViewParticipants: req.user.role === ROLES.HOST || req.user.role === ROLES.CO_HOST
+    };
+    
+    res.json({
+      ...result,
+      user: req.user,
+      uiPermissions
+    });
   } catch (error) {
     next(error);
   }

@@ -21,20 +21,20 @@ const createRateLimiter = (options) => {
 // Specific rate limiters for different operations
 const authLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 login attempts per 15 minutes
+  max: 10, // 5 login attempts per 15 minutes
   message: 'Too many login attempts, please try again later.'
 });
 
 const participantJoinLimiter = createRateLimiter({
   windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 3, // 3 join attempts per 5 minutes
+  max: 5, // 3 join attempts per 5 minutes
   message: 'Too many join attempts, please wait a few minutes.'
 });
 
 const messageLimiter = createRateLimiter({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 30, // 30 messages per minute
-  message: 'Sending messages too quickly, please slow down.'
+  max: 50, // 50 messages per minute
+  message: 'Too many Messages are sent too quickly, please slow down.'
 });
 
 const generalApiLimiter = createRateLimiter({

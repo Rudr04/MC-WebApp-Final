@@ -1,29 +1,24 @@
 class WebinarApp {
   constructor() {
     this.user = null;
+    this.uiPermissions = null;
   }
 
   async initialize() {
     console.log('Starting webinar initialization...');
 
-    // Check authentication
-    const userStr = sessionStorage.getItem('user');
-    console.log('User from session:', userStr ? 'Found' : 'Not found');
+    // Check if we have a token
+    const token = localStorage.getItem('webinar_token');
+    console.log('JWT token:', token ? 'Found' : 'Not found');
 
-    if (!userStr) {
+    if (!token) {
+      console.log('No JWT token found, redirecting to login');
       location.href = 'login.html';
       return;
     }
     
     try {
-      this.user = JSON.parse(userStr);
-      console.log('Parsed user:', this.user);
-
-      // Check if we have a token
-      const token = localStorage.getItem('webinar_token');
-      console.log('JWT token:', token ? 'Found' : 'Not found');
-
-      // Verify session with backend
+      // Verify session with backend and get user data from JWT
       console.log('Calling verify session...');
       const response = await apiClient.verifySession();
       console.log('Verify response:', response);
@@ -32,6 +27,17 @@ class WebinarApp {
         console.error('Session invalid in response');
         throw new Error('Invalid session');
       }
+
+      // Get user data from JWT (decoded by backend)
+      this.user = response.user;
+      console.log('User from JWT:', this.user);
+
+      // Store UI permissions from backend
+      this.uiPermissions = response.uiPermissions || {};
+      console.log('UI Permissions:', this.uiPermissions);
+
+      // Inject role-based UI elements before initializing components
+      this.injectRoleBasedUI();
 
       // Initialize Firebase Auth Manager
       window.firebaseAuthManager.initialize();
@@ -55,14 +61,9 @@ class WebinarApp {
       
       // Initialize components
       await streamPlayer.initialize();
-      chatManager.initialize(this.user);
+      chatManager.initialize(this.user, this.uiPermissions);
       
-      // Show host controls if applicable
-      if (this.user.role === 'host') {
-        document.getElementById('endSessionBtn').style.display = 'flex';
-      }
-      
-      // Set up event listeners
+      // Set up event listeners (after UI injection)
       this.setupEventListeners();
       
       // Watch for session end
@@ -82,6 +83,69 @@ class WebinarApp {
           console.error('Non-session error during initialization:', error);
         }
       }
+  }
+
+  injectRoleBasedUI() {
+    console.log('Injecting role-based UI elements...');
+    
+    // Inject recipient selector for hosts and co-hosts
+    if (this.uiPermissions.canSelectRecipients) {
+      const chatContainer = document.querySelector('.chat-container');
+      const chatMessages = document.querySelector('.chat-messages');
+      
+      const recipientSelectorHTML = `
+        <div class="recipient-selector" id="recipientSelector">
+          <select id="recipientSelect">
+            <option value="all">All Participants</option>
+          </select>
+        </div>
+      `;
+      
+      chatMessages.insertAdjacentHTML('beforebegin', recipientSelectorHTML);
+      console.log('Recipient selector injected');
+    }
+    
+    // Inject end session button for hosts only
+    if (this.uiPermissions.canEndSession) {
+      const messageInputContainer = document.querySelector('.message-input-container');
+      
+      const endSessionBtnHTML = `
+        <button class="end-btn" id="endSessionBtn">
+          <i class="fas fa-power-off"></i>
+          End
+        </button>
+      `;
+      
+      messageInputContainer.insertAdjacentHTML('beforeend', endSessionBtnHTML);
+      console.log('End session button injected');
+    }
+    
+    console.log('UI injection completed');
+    
+    // Set up event listeners for dynamically injected elements
+    this.setupDynamicEventListeners();
+  }
+
+  setupDynamicEventListeners() {
+    // End session button (dynamically injected for hosts)
+    const endBtn = document.getElementById('endSessionBtn');
+    if (endBtn) {
+      endBtn.addEventListener('click', () => this.endSession());
+      console.log('End session button event listener attached');
+    }
+    
+    // Recipient selector (dynamically injected for hosts/co-hosts)
+    const recipientSelect = document.getElementById('recipientSelect');
+    if (recipientSelect) {
+      // Add event listener if needed for recipient selection
+      console.log('Recipient selector found and ready');
+      
+      // Show the recipient selector
+      const recipientSelector = document.getElementById('recipientSelector');
+      if (recipientSelector) {
+        recipientSelector.style.display = 'block';
+      }
+    }
   }
 
   setupEventListeners() {
@@ -105,10 +169,6 @@ class WebinarApp {
     
     // Exit button
     document.querySelector('.exit-btn').addEventListener('click', () => this.logout());
-    
-    // End session button (host only)
-    const endBtn = document.getElementById('endSessionBtn');
-    if (endBtn) endBtn.addEventListener('click', () => this.endSession());
     
     // Fullscreen changes
     document.addEventListener('fullscreenchange', this.updateFullscreenButton);
@@ -163,10 +223,13 @@ class WebinarApp {
   async logout() {
     try {
       await apiClient.logout();
-      sessionStorage.clear();
+      // apiClient.logout() already clears tokens via apiClient.clearToken()
       location.href = 'login.html';
     } catch (error) {
       console.error('Logout error:', error);
+      // Clear tokens manually if API call fails
+      localStorage.removeItem('webinar_token');
+      sessionStorage.removeItem('firebase_token');
       location.href = 'login.html';
     }
   }

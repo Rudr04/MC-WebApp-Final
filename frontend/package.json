@@ -4,7 +4,7 @@
   "description": "Secure frontend for webinar platform",
   "scripts": {
     "start": "live-server --port=3000 --host=localhost",
-    "dev": "live-server --port=3000 --host=localhost"
+    "dev": "live-server  --port=3000 --host=localhost"
   },
   "devDependencies": {
     "live-server": "^1.2.0"

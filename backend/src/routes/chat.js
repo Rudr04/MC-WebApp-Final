@@ -11,7 +11,7 @@ const router = express.Router();
 router.post('/send', 
   verifyToken, 
   messageLimiter,
-  perUserRateLimiter(30, 1), // 30 messages per minute per user
+  perUserRateLimiter(10, 1), // 30 messages per minute per user
   validateSendMessage,
   async (req, res, next) => {
     try {

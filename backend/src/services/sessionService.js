@@ -4,14 +4,14 @@ const { logger } = require('../utils/logger');
 
 class SessionService {
   async getActiveSessionsCount() {
-    const snapshot = await db.ref('activeSessions').once('value');
+    const snapshot = await db.ref(FIREBASE_PATHS.ACTIVE_SESSIONS).once('value');
     return snapshot.numChildren();
   }
 
   async hasActiveHostSession() {
-    const hosts = await db.ref('activeHosts').once('value');
-    const coHosts = await db.ref('activeCoHosts').once('value');
-    return hosts.exists() || coHosts.exists();
+    const countSnapshot = await db.ref(FIREBASE_PATHS.ACTIVE_HOST_COUNT).once('value');
+    const count = countSnapshot.val() || 0;
+    return count > 0;
   }
 
   async endSession(hostId) {
@@ -30,7 +30,7 @@ class SessionService {
   }
 
   async checkSessionHealth() {
-    const sessionEnded = await db.ref('sessionEnded').once('value');
+    const sessionEnded = await db.ref(FIREBASE_PATHS.SESSION_ENDED).once('value');
     return {
       ended: sessionEnded.val() === true,
       hasActiveHost: await this.hasActiveHostSession()

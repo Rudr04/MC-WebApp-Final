@@ -23,7 +23,7 @@ document.getElementById('hostLoginBtn').addEventListener('click', async () => {
   try {
     const result = await authManager.loginWithGoogle();
     showAlert('Login successful! Redirecting...', 'success');
-    sessionStorage.setItem('user', JSON.stringify(result.user));
+    // User data will be retrieved from JWT token in webinar.js
     setTimeout(() => window.location.href = 'webinar.html', 1000);
   } catch (error) {
     const errorMessages = {
@@ -64,7 +64,7 @@ document.getElementById('participantJoinBtn').addEventListener('click', async ()
   try {
     const result = await authManager.loginParticipant(name, phone);
     showAlert('Authorization successful! Joining session...', 'success');
-    sessionStorage.setItem('user', JSON.stringify(result.user));
+    // User data will be retrieved from JWT token in webinar.js
     setTimeout(() => window.location.href = 'webinar.html', 1000);
   } catch (error) {
     const errorMessages = {

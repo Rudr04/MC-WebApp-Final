@@ -31,9 +31,16 @@ class ChatService {
           name: data.name,
         });
       }
+      else if (data.role === 'host' || data.role === 'co-host') {
+        hosts.push({
+          id: child.key,
+          name: data.name,
+          role: data.role
+        });
+      }
     });
 
-    return participants;
+    return { participants, hosts};
   }
 }
 
