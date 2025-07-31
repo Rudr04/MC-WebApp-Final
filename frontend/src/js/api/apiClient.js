@@ -95,11 +95,11 @@ class ApiClient {
     return response;
   }
 
-  async loginParticipant(name, phone) {
+  async loginParticipant(phone) {
     console.log('Logging in participant...');
     const response = await this.request(window.ENDPOINTS.AUTH.PARTICIPANT_LOGIN, {
       method: 'POST',
-      body: JSON.stringify({ name, phone })
+      body: JSON.stringify({ phone })
     });
     
     if (response.token) {

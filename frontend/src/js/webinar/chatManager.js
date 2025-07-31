@@ -1,7 +1,9 @@
 class ChatManager {
   constructor() {
-    this.firebase = null;
-    this.messagesRef = null;
+    this.firestore = null;
+    this.database = null; // Keep RTDB for users/sessions
+    this.messagesQuery = null;
+    this.unsubscribeMessages = null;
     this.currentUser = null;
     this.uiPermissions = null;
     this.sending = null;
@@ -12,22 +14,22 @@ class ChatManager {
     this.currentUser = user;
     this.uiPermissions = uiPermissions;
     
-    // Initialize Firebase for realtime database only
-    this.firebase = firebase.database();
+    // Initialize Firebase services
+    this.firestore = firebase.firestore();
+    this.database = firebase.database(); // Keep for users/sessions
   
     // Check if Firebase is authenticated
     if (!firebaseAuthManager.isAuthenticated) {
       console.warn('Firebase not authenticated, chat features may be limited');
     }
-    this.messagesRef = this.firebase.ref('messages');
     
     // Set up listeners
     this.setupMessageListener();
-    this.updateParticipantCount();
+    this.updateParticipantCount(); // Still uses RTDB
     
     // Load participants if user has recipient selection permissions
     if (this.uiPermissions.canSelectRecipients) {
-      this.loadParticipantsList();
+      this.loadParticipantsList(); // Still uses RTDB
       // Check if recipientSelector exists (might be injected after this call)
       const recipientSelector = document.getElementById('recipientSelector');
       if (recipientSelector) {
@@ -47,21 +49,79 @@ class ChatManager {
   }
 
   setupMessageListener() {
-    this.messagesRef.orderByChild('timestamp').on('child_added', snapshot => {
-      const message = snapshot.val();
-      if (!message) return;
-      
-      // Filter messages for participants
+    // Clean up existing listener
+    if (this.unsubscribeMessages) {
+      this.unsubscribeMessages();
+    }
+
+    const messagesRef = this.firestore.collection('messages');
+    let query;
+
+    try {
       if (this.currentUser.role === 'participant') {
-        const shouldShow = message.to === 'all' ||
-                           message.to === this.currentUser.phone ||
-                           message.fromId === this.currentUser.phone;
-        if (!shouldShow) return;
+        // Try optimized query first - will fail if index doesn't exist
+        const userIdentifier = this.currentUser.phone;
+        query = messagesRef
+          .where('visibility', 'array-contains-any', ['all', userIdentifier])
+          .orderBy('timestamp', 'asc');
+        
+        console.log(`Using optimized Firestore query for participant: ${userIdentifier}`);
+      } else {
+        // Hosts see all messages
+        query = messagesRef.orderBy('timestamp', 'asc');
+        console.log(`Using basic query for host/co-host: ${this.currentUser.name}`);
       }
-      
-      this.displayMessage(message); 
+
+      // Listen for real-time updates
+      this.unsubscribeMessages = query.onSnapshot((snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const message = change.doc.data();
+            this.displayMessage(message);
+          }
+        });
+      }, (error) => {
+        console.error('Optimized query failed, falling back to basic query + client filtering');
+        console.error('Error:', error.message);
+        
+        // Fallback to basic query with client-side filtering
+        this.setupBasicMessageListener();
+      });
+
+    } catch (error) {
+      console.error('Query setup failed, using fallback:', error);
+      this.setupBasicMessageListener();
+    }
+  }
+
+  setupBasicMessageListener() {
+    const messagesRef = this.firestore.collection('messages');
+    const query = messagesRef.orderBy('timestamp', 'asc');
+
+    console.log(`Using basic query with client-side filtering for ${this.currentUser.role}`);
+
+    this.unsubscribeMessages = query.onSnapshot((snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const message = change.doc.data();
+          
+          // Apply client-side filtering for participants
+          if (this.currentUser.role === 'participant') {
+            const userIdentifier = this.currentUser.phone;
+            const shouldShow = message.visibility.includes('all') || 
+                              message.visibility.includes(userIdentifier);
+            if (!shouldShow) return;
+          }
+          
+          this.displayMessage(message);
+        }
+      });
+    }, (error) => {
+      console.error('Error listening to messages:', error);
+      this.showNotification('Chat connection error. Please refresh.', 'error');
     });
   }
+
 
   selectParticipant(participantPhone) {
     const select = document.getElementById('recipientSelect');
@@ -180,7 +240,8 @@ class ChatManager {
   }
 
   async updateParticipantCount() {
-    const activeSessionsRef = this.firebase.ref('activeSessions');
+    // Keep using RTDB for session data
+    const activeSessionsRef = this.database.ref('activeSessions');
     
     activeSessionsRef.on('value', (snapshot) => {
       const count = snapshot.numChildren();
@@ -189,8 +250,8 @@ class ChatManager {
   }
 
   async loadParticipantsList() {
-    // Use real-time listener for users
-    const usersRef = this.firebase.ref('users');
+    // Keep using RTDB for user data
+    const usersRef = this.database.ref('users');
     
     usersRef.on('value', (snapshot) => {
       const participants = [];
@@ -212,6 +273,18 @@ class ChatManager {
         });
       }
     });
+  }
+
+  // Cleanup method for Firestore listener
+  cleanup() {
+    console.log('Cleaning up chat manager listeners...');
+    
+    if (this.unsubscribeMessages) {
+      this.unsubscribeMessages();
+      this.unsubscribeMessages = null;
+    }
+    
+    console.log('Chat manager cleanup completed');
   }
 
   showNotification(message, type) {

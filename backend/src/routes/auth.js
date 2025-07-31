@@ -27,8 +27,8 @@ router.post('/participant/login',
   validateParticipantLogin, 
   async (req, res, next) => {
     try {
-      const { name, phone } = req.body;
-      const result = await authService.authenticateParticipant(name, phone);
+      const { phone } = req.body;
+      const result = await authService.authenticateParticipant(phone);
       res.json({
         ...result,
         message: MESSAGES.SUCCESS.LOGIN

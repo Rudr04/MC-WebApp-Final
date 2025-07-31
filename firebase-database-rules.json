@@ -1,0 +1,57 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    
+    "messages": {
+      ".indexOn": ["to", "fromId", "timestamp"],
+      "$messageId": {
+        ".read": "auth != null && (
+          // Allow hosts and co-hosts to read all messages
+          auth.token.role == 'host' || 
+          auth.token.role == 'co-host' ||
+          // Allow participants to read messages sent to 'all'
+          data.child('to').val() == 'all' ||
+          // Allow participants to read messages sent to them specifically
+          data.child('to').val() == auth.token.phone ||
+          // Allow participants to read their own messages
+          data.child('fromId').val() == auth.token.phone
+        )",
+        ".write": "auth != null && (
+          // Only allow authenticated users to write messages
+          auth.token.phone != null || auth.token.email != null
+        )"
+      }
+    },
+    
+    "activeSessions": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    
+    "users": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    
+    "activeHosts": {
+      ".read": "auth != null",
+      ".write": "auth != null && (auth.token.role == 'host' || auth.token.role == 'co-host')"
+    },
+    
+    "activeHostCount": {
+      ".read": "auth != null",
+      ".write": "auth != null && (auth.token.role == 'host' || auth.token.role == 'co-host')"
+    },
+    
+    "sessionEnded": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.role == 'host'"
+    },
+    
+    "whitelist": {
+      ".read": "auth != null && (auth.token.role == 'host' || auth.token.role == 'co-host')",
+      ".write": "auth != null && auth.token.role == 'host'"
+    }
+  }
+}

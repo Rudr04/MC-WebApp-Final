@@ -21,5 +21,6 @@ try {
 
 const db = admin.database();
 const auth = admin.auth();
+const firestore = admin.firestore();
 
-module.exports = { admin, db, auth };
+module.exports = { admin, db, auth, firestore };

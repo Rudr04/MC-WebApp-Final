@@ -37,8 +37,8 @@ class AuthManager {
     }
   }
 
-  async loginParticipant(name, phone) {
-    const response = await apiClient.loginParticipant(name, phone);
+  async loginParticipant(phone) {
+    const response = await apiClient.loginParticipant(phone);
     this.currentUser = response.user;
     return response;
   }

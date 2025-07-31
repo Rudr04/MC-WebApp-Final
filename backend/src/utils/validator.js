@@ -37,14 +37,6 @@ const sanitizePhone = (value) => {
 const validationRules = {
   // Auth validations
   participantLogin: [
-    body('name')
-      .trim()
-      .isLength({ min: VALIDATION.NAME_MIN_LENGTH, max: VALIDATION.NAME_MAX_LENGTH })
-      .withMessage(`Name must be between ${VALIDATION.NAME_MIN_LENGTH} and ${VALIDATION.NAME_MAX_LENGTH} characters`)
-      .matches(VALIDATION.NAME_REGEX)
-      .withMessage('Name can only contain letters and spaces')
-      .customSanitizer(sanitizeInput),
-    
     body('phone')
       .customSanitizer(sanitizePhone)
       .matches(VALIDATION.PHONE_REGEX)

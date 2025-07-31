@@ -64,11 +64,31 @@ class AuthService {
     return { firebaseToken, token, user };
   }
 
-  async authenticateParticipant(name, phone) {
-    // Check whitelist
-    const whitelisted = await db.ref(`${FIREBASE_PATHS.WHITELIST}/${phone}`).once('value');
-    if (!whitelisted.exists()) {
+  async authenticateParticipant(phone) {
+    // Check whitelist and get user data
+    const whitelistEntry = await db.ref(`${FIREBASE_PATHS.WHITELIST}/${phone}`).once('value');
+    if (!whitelistEntry.exists()) {
       throw new Error(MESSAGES.ERROR.NOT_WHITELISTED);
+    }
+
+    // Handle both old format (phone: true) and new format (phone: {name: "...", source: "..."})
+    const whitelistData = whitelistEntry.val();
+    let name;
+    
+    if (typeof whitelistData === 'boolean' && whitelistData === true) {
+      // Old format - backward compatibility
+      throw new Error('Name not found in whitelist. Please contact administrator.');
+    } else if (typeof whitelistData === 'object' && whitelistData.name) {
+      // New format - extract name
+      name = whitelistData.name;
+    } else {
+      // Invalid format
+      throw new Error('Invalid whitelist entry format. Please contact administrator.');
+    }
+
+    // Validate extracted name
+    if (!name || name.trim().length === 0) {
+      throw new Error('Name not found in whitelist. Please contact administrator.');
     }
 
     // Check if already in session
@@ -85,7 +105,7 @@ class AuthService {
 
     const user = {
       phone: phone,
-      name: name,
+      name: name.trim(),
       role: ROLES.PARTICIPANT,
       uid: phone // Using phone as UID for participants
     };
@@ -111,14 +131,9 @@ class AuthService {
       uid: participantUid
     });
 
-    logger.info(`Participant joined: ${name} (${phone})`);
+    logger.info(`Participant joined: ${name} (${phone}) - Name from whitelist`);
 
     return { firebaseToken, token, user };
-  }
-
-  async checkActiveHosts() {
-    const hosts = await db.ref(FIREBASE_PATHS.ACTIVE_HOSTS).once('value');
-    return hosts.exists();
   }
 
   async verifySession(token) {

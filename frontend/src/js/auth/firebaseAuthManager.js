@@ -18,11 +18,13 @@ class FirebaseAuthManager {
     if (!firebase.apps.length) {
       firebase.initializeApp({
         apiKey: "AIzaSyA4z-ifjabIh4bJBBsBJeuDfIkyMkoRHAE",
-        databaseURL: "https://cosmoguru-server-default-rtdb.firebaseio.com"
+        databaseURL: "https://cosmoguru-server-default-rtdb.firebaseio.com",
+        projectId: "cosmoguru-server"
       });
     }
     
     this.database = firebase.database();
+    this.firestore = firebase.firestore();
     
     // Listen for auth state changes
     firebase.auth().onAuthStateChanged((user) => {

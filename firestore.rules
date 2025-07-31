@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /messages/{messageId} {
+      // Read rules: Allow authenticated users to read messages
+      allow read: if request.auth != null && (
+        // Public messages (visible to all)
+        resource.data.visibility.hasAny(['all']) ||
+        // Private messages (visible to sender/recipient)
+        (request.auth.token.phone != null && resource.data.visibility.hasAny([request.auth.token.phone])) ||
+        (request.auth.token.email != null && resource.data.visibility.hasAny([request.auth.token.email])) ||
+        // Hosts can see all messages
+        (request.auth.token.role != null && request.auth.token.role in ['host', 'co-host'])
+      );
+      
+      // Write rules: Allow authenticated users to create messages
+      allow create: if request.auth != null &&
+        request.resource.data.keys().hasAll(['from', 'fromId', 'to', 'text', 'timestamp', 'visibility']) &&
+        request.resource.data.visibility is list &&
+        request.resource.data.visibility.size() > 0;
+      
+      // Prevent message editing/deletion for immutability
+      allow update, delete: if false;
+    }
+  }
+}

@@ -222,11 +222,20 @@ class WebinarApp {
 
   async logout() {
     try {
+      // Cleanup chat manager listeners before logout
+      if (window.chatManager) {
+        chatManager.cleanup();
+      }
+      
       await apiClient.logout();
       // apiClient.logout() already clears tokens via apiClient.clearToken()
       location.href = 'login.html';
     } catch (error) {
       console.error('Logout error:', error);
+      // Clean up chat manager even if API call fails
+      if (window.chatManager) {
+        chatManager.cleanup();
+      }
       // Clear tokens manually if API call fails
       localStorage.removeItem('webinar_token');
       sessionStorage.removeItem('firebase_token');
