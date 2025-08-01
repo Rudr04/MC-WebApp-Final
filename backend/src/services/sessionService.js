@@ -20,10 +20,12 @@ class SessionService {
     // Set session ended flag
     await db.ref(FIREBASE_PATHS.SESSION_ENDED).set(true);
     
-    // Clear all sessions
+    // Clear all sessions and reset counters
     await Promise.all([
       db.ref(FIREBASE_PATHS.ACTIVE_SESSIONS).remove(),
       db.ref(FIREBASE_PATHS.ACTIVE_HOSTS).remove(),
+      db.ref(FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT).set(0),
+      db.ref(FIREBASE_PATHS.ACTIVE_HOST_COUNT).set(0)
     ]);
 
     logger.info('Session ended successfully');

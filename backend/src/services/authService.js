@@ -117,6 +117,11 @@ class AuthService {
       timestamp: Date.now()
     });
 
+    // Increment active participant count
+    await db.ref(FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT).transaction((current) => {
+      return (current || 0) + 1;
+    });
+
     // Generate JWT
     const token = jwt.sign(user, config.jwt.secret, {
       expiresIn: config.jwt.expiry
@@ -162,6 +167,11 @@ class AuthService {
       
       if (decoded.role === ROLES.PARTICIPANT) {
         await db.ref(`${FIREBASE_PATHS.ACTIVE_SESSIONS}/${decoded.phone}`).remove();
+        
+        // Decrement active participant count
+        await db.ref(FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT).transaction((current) => {
+          return Math.max(0, (current || 0) - 1);
+        });
       } else {
         // Remove host session
         await db.ref(`${FIREBASE_PATHS.ACTIVE_HOSTS}/${decoded.uid}`).remove();

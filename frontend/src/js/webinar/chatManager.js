@@ -25,7 +25,7 @@ class ChatManager {
     
     // Set up listeners
     this.setupMessageListener();
-    this.updateParticipantCount(); // Still uses RTDB
+    this.updateParticipantCount();
     
     // Load participants if user has recipient selection permissions
     if (this.uiPermissions.canSelectRecipients) {
@@ -65,11 +65,9 @@ class ChatManager {
           .where('visibility', 'array-contains-any', ['all', userIdentifier])
           .orderBy('timestamp', 'asc');
         
-        console.log(`Using optimized Firestore query for participant: ${userIdentifier}`);
       } else {
         // Hosts see all messages
         query = messagesRef.orderBy('timestamp', 'asc');
-        console.log(`Using basic query for host/co-host: ${this.currentUser.name}`);
       }
 
       // Listen for real-time updates
@@ -97,8 +95,6 @@ class ChatManager {
   setupBasicMessageListener() {
     const messagesRef = this.firestore.collection('messages');
     const query = messagesRef.orderBy('timestamp', 'asc');
-
-    console.log(`Using basic query with client-side filtering for ${this.currentUser.role}`);
 
     this.unsubscribeMessages = query.onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -240,29 +236,27 @@ class ChatManager {
   }
 
   async updateParticipantCount() {
-    // Keep using RTDB for session data
-    const activeSessionsRef = this.database.ref('activeSessions');
+    // Use activeParticipantCount for better performance
+    const activeParticipantCountRef = this.database.ref('activeParticipantCount');
     
-    activeSessionsRef.on('value', (snapshot) => {
-      const count = snapshot.numChildren();
+    activeParticipantCountRef.on('value', (snapshot) => {
+      const count = snapshot.val() || 0;
       document.getElementById('participantNumber').textContent = count;
     });
   }
 
   async loadParticipantsList() {
     // Keep using RTDB for user data
-    const usersRef = this.database.ref('users');
+    const participantsRef = this.database.ref('users').orderByChild('role').equalTo('participant');
     
-    usersRef.on('value', (snapshot) => {
+    participantsRef.on('value', (snapshot) => {
       const participants = [];
       snapshot.forEach(child => {
         const data = child.val();
-        if (data.role === 'participant') {
-          participants.push({
+        participants.push({
             id: child.key,
             name: data.name,
           });
-        }
       });
       
       const select = document.getElementById('recipientSelect');
@@ -277,14 +271,10 @@ class ChatManager {
 
   // Cleanup method for Firestore listener
   cleanup() {
-    console.log('Cleaning up chat manager listeners...');
-    
     if (this.unsubscribeMessages) {
       this.unsubscribeMessages();
       this.unsubscribeMessages = null;
     }
-    
-    console.log('Chat manager cleanup completed');
   }
 
   showNotification(message, type) {

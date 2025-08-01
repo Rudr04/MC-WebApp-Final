@@ -21,6 +21,7 @@ module.exports = {
     ACTIVE_HOSTS: 'activeHosts',
     ACTIVE_HOST_COUNT: 'activeHostCount',
     ACTIVE_SESSIONS: 'activeSessions',
+    ACTIVE_PARTICIPANT_COUNT: 'activeParticipantCount',
     USERS: 'users',
     MESSAGES: 'messages',
     SESSION_ENDED: 'sessionEnded'
