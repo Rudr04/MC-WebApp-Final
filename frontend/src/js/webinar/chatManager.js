@@ -25,7 +25,7 @@ class ChatManager {
     
     // Set up listeners
     this.setupMessageListener();
-    this.updateParticipantCount();
+    this.updateParticipantCount(); // Still uses RTDB
     
     // Load participants if user has recipient selection permissions
     if (this.uiPermissions.canSelectRecipients) {
@@ -65,9 +65,11 @@ class ChatManager {
           .where('visibility', 'array-contains-any', ['all', userIdentifier])
           .orderBy('timestamp', 'asc');
         
+        console.log(`Using optimized Firestore query for participant: ${userIdentifier}`);
       } else {
         // Hosts see all messages
         query = messagesRef.orderBy('timestamp', 'asc');
+        console.log(`Using basic query for host/co-host: ${this.currentUser.name}`);
       }
 
       // Listen for real-time updates
@@ -95,6 +97,8 @@ class ChatManager {
   setupBasicMessageListener() {
     const messagesRef = this.firestore.collection('messages');
     const query = messagesRef.orderBy('timestamp', 'asc');
+
+    console.log(`Using basic query with client-side filtering for ${this.currentUser.role}`);
 
     this.unsubscribeMessages = query.onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
@@ -241,6 +245,7 @@ class ChatManager {
     
     activeParticipantCountRef.on('value', (snapshot) => {
       const count = snapshot.val() || 0;
+      console.log('Active participant count:', count);
       document.getElementById('participantNumber').textContent = count;
     });
   }
@@ -271,10 +276,14 @@ class ChatManager {
 
   // Cleanup method for Firestore listener
   cleanup() {
+    console.log('Cleaning up chat manager listeners...');
+    
     if (this.unsubscribeMessages) {
       this.unsubscribeMessages();
       this.unsubscribeMessages = null;
     }
+    
+    console.log('Chat manager cleanup completed');
   }
 
   showNotification(message, type) {

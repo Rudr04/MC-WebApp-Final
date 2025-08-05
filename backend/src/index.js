@@ -7,6 +7,7 @@ const compression = require('compression');
 const { logger } = require('./utils/logger');
 const { errorHandler } = require('./middleware/error');
 const { generalApiLimiter } = require('./middleware/rateLimit');
+const sessionMonitor = require('./services/sessionMonitor');
 const authRoutes = require('./routes/auth');
 const sessionRoutes = require('./routes/session');
 const chatRoutes = require('./routes/chat');
@@ -49,12 +50,23 @@ app.use(errorHandler);
 // Start server
 app.listen(PORT, () => {
   logger.info(`Server running on port http://localhost:${PORT}`);
+  
+  // Start session monitor after server is ready
+  sessionMonitor.start();
+  logger.info('Session monitor started');
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM signal received: closing HTTP server');
+  sessionMonitor.stop();
   app.close(() => {
     logger.info('HTTP server closed');
   });
+});
+
+process.on('SIGINT', () => {
+  logger.info('SIGINT signal received: closing HTTP server');
+  sessionMonitor.stop();
+  process.exit(0);
 });

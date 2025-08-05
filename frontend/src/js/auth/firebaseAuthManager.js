@@ -272,22 +272,6 @@ class FirebaseAuthManager {
     return this.database.ref(path);
   }
 
-  /**
-   * Safe database operation with auth check
-   */
-  async safeDbOperation(operation) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (error.message && error.message.includes('permission_denied')) {
-        console.error('Permission denied, attempting to re-authenticate...');
-        await this.refreshFirebaseToken();
-        // Retry operation once
-        return await operation();
-      }
-      throw error;
-    }
-  }
 }
 
 // Create singleton instance

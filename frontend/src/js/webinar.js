@@ -2,6 +2,7 @@ class WebinarApp {
   constructor() {
     this.user = null;
     this.uiPermissions = null;
+    this.heartbeatManager = new HeartbeatManager();
   }
 
   async initialize() {
@@ -62,6 +63,9 @@ class WebinarApp {
       // Initialize components
       await streamPlayer.initialize();
       chatManager.initialize(this.user, this.uiPermissions);
+      
+      // Initialize heartbeat manager
+      this.heartbeatManager.initialize(this.user);
       
       // Set up event listeners (after UI injection)
       this.setupEventListeners();
@@ -222,9 +226,13 @@ class WebinarApp {
 
   async logout() {
     try {
-      // Cleanup chat manager listeners before logout
+      // Cleanup managers before logout
       if (window.chatManager) {
         chatManager.cleanup();
+      }
+      
+      if (this.heartbeatManager) {
+        this.heartbeatManager.cleanup();
       }
       
       await apiClient.logout();
@@ -232,10 +240,15 @@ class WebinarApp {
       location.href = 'login.html';
     } catch (error) {
       console.error('Logout error:', error);
-      // Clean up chat manager even if API call fails
+      // Clean up managers even if API call fails
       if (window.chatManager) {
         chatManager.cleanup();
       }
+      
+      if (this.heartbeatManager) {
+        this.heartbeatManager.cleanup();
+      }
+      
       // Clear tokens manually if API call fails
       localStorage.removeItem('webinar_token');
       sessionStorage.removeItem('firebase_token');

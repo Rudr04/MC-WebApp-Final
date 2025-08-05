@@ -38,26 +38,48 @@ class AuthService {
       role: role
     };
 
-    // Create session in database
-    await db.ref(`${FIREBASE_PATHS.ACTIVE_HOSTS}/${user.uid}`).set({
-      ...user,
-      timestamp: Date.now()
+    // ATOMIC OPERATION: All host session data must be updated together
+    // This ensures counter and host list stay in sync
+    await db.ref().transaction((current) => {
+      if (current === null) current = {};
+      
+      // Initialize paths if they don't exist
+      if (!current[FIREBASE_PATHS.ACTIVE_HOSTS]) current[FIREBASE_PATHS.ACTIVE_HOSTS] = {};
+      if (!current[FIREBASE_PATHS.USERS]) current[FIREBASE_PATHS.USERS] = {};
+      
+      // Set host data
+      current[FIREBASE_PATHS.ACTIVE_HOSTS][user.uid] = {
+        ...user,
+        timestamp: Date.now()
+      };
+      
+      // Set user data with heartbeat fields
+      current[FIREBASE_PATHS.USERS][user.uid] = {
+        ...user,
+        timestamp: Date.now(),
+        lastHeartbeat: Date.now(),
+        userState: 'active'
+      };
+      
+      // Clear session ended flag
+      current[FIREBASE_PATHS.SESSION_ENDED] = false;
+      
+      // Increment active host count atomically with host list update
+      current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] = (current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] || 0) + 1;
+      
+      return current;
     });
 
-    // Clear session ended flag
-    await db.ref(FIREBASE_PATHS.SESSION_ENDED).set(false);
-
-    // Increment active host count
-    await db.ref(FIREBASE_PATHS.ACTIVE_HOST_COUNT).transaction((current) => {
-      return (current || 0) + 1;
-    });
-
-    // Generate JWT
-    const token = jwt.sign(user, config.jwt.secret, {
-      expiresIn: config.jwt.expiry
-    });
-
-    const firebaseToken = await this.generateFirebaseToken(user.uid, user);
+    // PARALLEL OPERATION: JWT and Firebase token generation are independent
+    // These can be done simultaneously to improve performance
+    const [token, firebaseToken] = await Promise.all([
+      // JWT token generation (synchronous but wrapped for consistency)
+      Promise.resolve(jwt.sign(user, config.jwt.secret, {
+        expiresIn: config.jwt.expiry
+      })),
+      // Firebase token generation (asynchronous)
+      this.generateFirebaseToken(user.uid, user)
+    ]);
 
     logger.info(`Host logged in: ${email}`);
     
@@ -110,31 +132,53 @@ class AuthService {
       uid: phone // Using phone as UID for participants
     };
 
-    // Create session
-    await db.ref(`${FIREBASE_PATHS.ACTIVE_SESSIONS}/${phone}`).set(true);
-    await db.ref(`${FIREBASE_PATHS.USERS}/${phone}`).set({
-      ...user,
-      timestamp: Date.now()
-    });
-
-    // Increment active participant count
-    await db.ref(FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT).transaction((current) => {
-      return (current || 0) + 1;
-    });
-
-    // Generate JWT
-    const token = jwt.sign(user, config.jwt.secret, {
-      expiresIn: config.jwt.expiry
+    // ATOMIC OPERATION: Participant session and counter must be updated together
+    // This ensures participant count matches actual active sessions
+    await db.ref().transaction((current) => {
+      if (current === null) current = {};
+      
+      // Double-check session doesn't exist (race condition protection)
+      if (current[FIREBASE_PATHS.ACTIVE_SESSIONS] && current[FIREBASE_PATHS.ACTIVE_SESSIONS][phone]) {
+        throw new Error(MESSAGES.ERROR.ALREADY_IN_SESSION);
+      }
+      
+      // Initialize paths if they don't exist
+      if (!current[FIREBASE_PATHS.ACTIVE_SESSIONS]) current[FIREBASE_PATHS.ACTIVE_SESSIONS] = {};
+      if (!current[FIREBASE_PATHS.USERS]) current[FIREBASE_PATHS.USERS] = {};
+      
+      // Create session
+      current[FIREBASE_PATHS.ACTIVE_SESSIONS][phone] = true;
+      
+      // Create user data with heartbeat fields
+      current[FIREBASE_PATHS.USERS][phone] = {
+        ...user,
+        timestamp: Date.now(),
+        lastHeartbeat: Date.now(),
+        userState: 'active'
+      };
+      
+      // Increment participant count atomically with session creation
+      current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] = (current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] || 0) + 1;
+      
+      return current;
     });
 
     const sanitizedPhone = phone.replace(/[^0-9]/g, '');
     const participantUid = `participant_${sanitizedPhone}`; //sanitize before passing for token generation firebase
 
-    // Generate Firebase custom token
-    const firebaseToken = await this.generateFirebaseToken(participantUid, {
-      ...user,
-      uid: participantUid
-    });
+    // PARALLEL OPERATION: JWT and Firebase token generation are independent
+    // These can be done simultaneously to improve performance
+    const [token, firebaseToken] = await Promise.all([
+      // JWT token generation (synchronous but wrapped for consistency)
+      Promise.resolve(jwt.sign(user, config.jwt.secret, {
+        expiresIn: config.jwt.expiry
+      })),
+      // Firebase token generation (asynchronous)
+      this.generateFirebaseToken(participantUid, {
+        ...user,
+        uid: participantUid
+      })
+    ]);
 
     logger.info(`Participant joined: ${name} (${phone}) - Name from whitelist`);
 
@@ -166,20 +210,37 @@ class AuthService {
       const decoded = jwt.verify(token, config.jwt.secret);
       
       if (decoded.role === ROLES.PARTICIPANT) {
-        await db.ref(`${FIREBASE_PATHS.ACTIVE_SESSIONS}/${decoded.phone}`).remove();
-        
-        // Decrement active participant count
-        await db.ref(FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT).transaction((current) => {
-          return Math.max(0, (current || 0) - 1);
+        // ATOMIC OPERATION: Remove participant session and decrement counter together
+        // This ensures participant count matches actual active sessions
+        await db.ref().transaction((current) => {
+          if (current === null) current = {};
+          
+          // Remove session if it exists
+          if (current[FIREBASE_PATHS.ACTIVE_SESSIONS] && current[FIREBASE_PATHS.ACTIVE_SESSIONS][decoded.phone]) {
+            delete current[FIREBASE_PATHS.ACTIVE_SESSIONS][decoded.phone];
+            
+            // Decrement participant count atomically with session removal
+            current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] = Math.max(0, (current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] || 0) - 1);
+          }
+          
+          return current;
         });
       } else {
-        // Remove host session
-        await db.ref(`${FIREBASE_PATHS.ACTIVE_HOSTS}/${decoded.uid}`).remove();
-
-        // Decrement active host count
-        await db.ref('activeHostCount').transaction((current) => {
-          return Math.max(0, (current || 0) - 1);
-        }); 
+        // ATOMIC OPERATION: Remove host session and decrement counter together
+        // This ensures host count matches actual active hosts
+        await db.ref().transaction((current) => {
+          if (current === null) current = {};
+          
+          // Remove host if it exists
+          if (current[FIREBASE_PATHS.ACTIVE_HOSTS] && current[FIREBASE_PATHS.ACTIVE_HOSTS][decoded.uid]) {
+            delete current[FIREBASE_PATHS.ACTIVE_HOSTS][decoded.uid];
+            
+            // Decrement host count atomically with host removal
+            current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] = Math.max(0, (current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] || 0) - 1);
+          }
+          
+          return current;
+        });
       }
 
       logger.info(`User logged out: ${decoded.name}`);

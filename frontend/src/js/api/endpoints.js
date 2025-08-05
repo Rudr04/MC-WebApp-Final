@@ -18,7 +18,9 @@ const ENDPOINTS = {
   SESSION: {
     GET_COUNT: `${API_VERSION}/session/count`,
     GET_STATUS: `${API_VERSION}/session/status`,
-    END_SESSION: `${API_VERSION}/session/end`
+    END_SESSION: `${API_VERSION}/session/end`,
+    HEARTBEAT: `${API_VERSION}/session/heartbeat`,
+    BEACON: `${API_VERSION}/session/beacon`
   },
   
   // Chat endpoints
