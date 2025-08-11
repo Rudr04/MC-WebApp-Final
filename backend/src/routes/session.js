@@ -36,6 +36,7 @@ router.get('/status', async (req, res, next) => {
   }
 });
 
+<<<<<<< Updated upstream
 // Heartbeat endpoint (authenticated)
 router.post('/heartbeat', verifyToken, async (req, res, next) => {
   try {
@@ -73,10 +74,26 @@ router.post('/heartbeat', verifyToken, async (req, res, next) => {
     
   } catch (error) {
     logger.error('Heartbeat error:', error);
+=======
+// Update session state (authenticated)
+router.post('/state', verifyToken, async (req, res, next) => {
+  try {
+    const { state, source } = req.body;
+    const { user } = req;
+    
+    if (!state || !source) {
+      return res.status(400).json({ error: 'Missing state or source' });
+    }
+    
+    await sessionService.updateUserState(user, state, source);
+    res.json({ success: true });
+  } catch (error) {
+>>>>>>> Stashed changes
     next(error);
   }
 });
 
+<<<<<<< Updated upstream
 // Beacon endpoint (no auth - for page unload)
 router.post('/beacon', async (req, res, next) => {
   try {
@@ -104,6 +121,23 @@ router.post('/beacon', async (req, res, next) => {
     logger.error('Beacon error:', error);
     // Don't use next(error) for beacon as it might not complete
     res.status(500).json({ error: 'Beacon processing failed' });
+=======
+// Beacon endpoint for beforeunload (no auth)
+router.post('/beacon', async (req, res, next) => {
+  try {
+    const { userId, state, source } = req.body;
+    
+    if (!userId || !state || !source) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    await sessionService.updateUserStateByUserId(userId, state, source);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Beacon error:', error);
+    // Always return success for beacon to avoid retries
+    res.json({ success: true });
+>>>>>>> Stashed changes
   }
 });
 

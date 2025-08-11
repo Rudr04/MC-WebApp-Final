@@ -19,7 +19,11 @@ const ENDPOINTS = {
     GET_COUNT: `${API_VERSION}/session/count`,
     GET_STATUS: `${API_VERSION}/session/status`,
     END_SESSION: `${API_VERSION}/session/end`,
+<<<<<<< Updated upstream
     HEARTBEAT: `${API_VERSION}/session/heartbeat`,
+=======
+    UPDATE_STATE: `${API_VERSION}/session/state`,
+>>>>>>> Stashed changes
     BEACON: `${API_VERSION}/session/beacon`
   },
   

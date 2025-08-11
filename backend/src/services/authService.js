@@ -47,9 +47,18 @@ class AuthService {
       if (!current[FIREBASE_PATHS.ACTIVE_HOSTS]) current[FIREBASE_PATHS.ACTIVE_HOSTS] = {};
       if (!current[FIREBASE_PATHS.USERS]) current[FIREBASE_PATHS.USERS] = {};
       
+<<<<<<< Updated upstream
       // Set host data
       current[FIREBASE_PATHS.ACTIVE_HOSTS][user.uid] = {
+=======
+      // Set host data with state tracking
+      current[FIREBASE_PATHS.ACTIVE_USERS].hosts[user.uid] = {
+>>>>>>> Stashed changes
         ...user,
+        state: 'active',
+        stateUpdatedAt: Date.now(),
+        stateSource: 'login',
+        lastSeen: Date.now(),
         timestamp: Date.now()
       };
       
@@ -68,6 +77,20 @@ class AuthService {
       current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] = (current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] || 0) + 1;
       
       return current;
+    });
+
+    // Set up onDisconnect for host
+    const hostRef = db.ref(`${FIREBASE_PATHS.ACTIVE_USERS_HOSTS}/${user.uid}`);
+    await hostRef.onDisconnect().update({
+      state: 'offline',
+      stateUpdatedAt: admin.database.ServerValue.TIMESTAMP,
+      stateSource: 'connection'
+    });
+    
+    // Set up counter decrement on disconnect
+    const hostCounterRef = db.ref(FIREBASE_PATHS.ACTIVE_USERS_COUNTS_HOSTS);
+    await hostCounterRef.onDisconnect().transaction((count) => {
+      return Math.max(0, (count || 0) - 1);
     });
 
     // PARALLEL OPERATION: JWT and Firebase token generation are independent
@@ -146,8 +169,20 @@ class AuthService {
       if (!current[FIREBASE_PATHS.ACTIVE_SESSIONS]) current[FIREBASE_PATHS.ACTIVE_SESSIONS] = {};
       if (!current[FIREBASE_PATHS.USERS]) current[FIREBASE_PATHS.USERS] = {};
       
+<<<<<<< Updated upstream
       // Create session
       current[FIREBASE_PATHS.ACTIVE_SESSIONS][phone] = true;
+=======
+      // Create participant session with state tracking
+      current[FIREBASE_PATHS.ACTIVE_USERS].participants[phone] = {
+        ...user,
+        state: 'active',
+        stateUpdatedAt: Date.now(),
+        stateSource: 'login',
+        lastSeen: Date.now(),
+        timestamp: Date.now()
+      };
+>>>>>>> Stashed changes
       
       // Create user data with heartbeat fields
       current[FIREBASE_PATHS.USERS][phone] = {
@@ -161,6 +196,20 @@ class AuthService {
       current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] = (current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] || 0) + 1;
       
       return current;
+    });
+
+    // Set up onDisconnect for participant
+    const participantRef = db.ref(`${FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS}/${phone}`);
+    await participantRef.onDisconnect().update({
+      state: 'offline',
+      stateUpdatedAt: admin.database.ServerValue.TIMESTAMP,
+      stateSource: 'connection'
+    });
+    
+    // Set up counter decrement on disconnect
+    const participantCounterRef = db.ref(FIREBASE_PATHS.ACTIVE_USERS_COUNTS_PARTICIPANTS);
+    await participantCounterRef.onDisconnect().transaction((count) => {
+      return Math.max(0, (count || 0) - 1);
     });
 
     const sanitizedPhone = phone.replace(/[^0-9]/g, '');
@@ -195,6 +244,44 @@ class AuthService {
         logger.warn('Could not generate Firebase token during verify:', error.message);
       }
 
+<<<<<<< Updated upstream
+=======
+      // Update user state to active if not already active (handles tab restore)
+      const userType = decoded.role === 'host' ? 'hosts' : 'participants';
+      const userId = decoded.role === 'host' ? decoded.uid : decoded.phone;
+      
+      try {
+        await db.ref().transaction((data) => {
+          if (!data) data = {};
+          
+          // Initialize paths
+          if (!data.activeUsers) data.activeUsers = {};
+          if (!data.activeUsers[userType]) data.activeUsers[userType] = {};
+          if (!data.activeUsers.counts) data.activeUsers.counts = {};
+          if (!data.activeUsers.counts[userType]) data.activeUsers.counts[userType] = 0;
+          
+          const currentUser = data.activeUsers[userType][userId];
+          const currentState = currentUser?.state;
+          
+          // Only update if not already active (prevents double increment on page reload)
+          if (currentState !== 'active' && currentUser) {
+            data.activeUsers[userType][userId] = {
+              ...currentUser,
+              state: 'active',
+              stateUpdatedAt: Date.now(),
+              stateSource: 'verifySession',
+              lastSeen: Date.now()
+            };
+            data.activeUsers.counts[userType] = (data.activeUsers.counts[userType] || 0) + 1;
+          }
+          
+          return data;
+        });
+      } catch (error) {
+        logger.warn('Could not update user state during verify:', error.message);
+      }
+
+>>>>>>> Stashed changes
       return {
         valid: true, 
         user: decoded,

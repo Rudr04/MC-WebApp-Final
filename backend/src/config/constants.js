@@ -23,7 +23,6 @@ module.exports = {
     ACTIVE_SESSIONS: 'activeSessions',
     ACTIVE_PARTICIPANT_COUNT: 'activeParticipantCount',
     USERS: 'users',
-    MESSAGES: 'messages',
     SESSION_ENDED: 'sessionEnded'
   },
   

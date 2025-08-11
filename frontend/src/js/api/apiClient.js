@@ -138,6 +138,7 @@ class ApiClient {
     return this.request(window.ENDPOINTS.SESSION.END_SESSION, { method: 'POST' });
   }
 
+<<<<<<< Updated upstream
   async sendHeartbeat(userId, userState, timestamp, isStateChange = false) {
     return this.request(window.ENDPOINTS.SESSION.HEARTBEAT, {
       method: 'POST',
@@ -181,6 +182,15 @@ class ApiClient {
     }
   }
 
+=======
+  async updateSessionState(data) {
+    return this.request(window.ENDPOINTS.SESSION.UPDATE_STATE, {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+>>>>>>> Stashed changes
   // Chat endpoints
   async sendMessage(message, to) {
     return this.request(window.ENDPOINTS.CHAT.SEND_MESSAGE, {
@@ -197,6 +207,20 @@ class ApiClient {
   async getStreamConfig() {
     console.log('Getting stream config...');
     return this.request(window.ENDPOINTS.STREAM.GET_CONFIG);
+  }
+
+  async sendBeacon(userId, state, source) {
+    // Beacon endpoint doesn't use authentication
+    const url = `${this.baseURL}${window.ENDPOINTS.SESSION.BEACON}`;
+    
+    const payload = {
+      userId: userId,
+      state: state,
+      source: source
+    };
+    
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    return navigator.sendBeacon(url, blob);
   }
 }
 

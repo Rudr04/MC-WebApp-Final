@@ -182,8 +182,27 @@ class WebinarApp {
     addEventListener('online', () => this.updateConnectionStatus('connected'));
     addEventListener('offline', () => this.updateConnectionStatus('disconnected'));
     
-    // Prevent accidental refresh
+    // Visibility tracking
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.updateSessionState('background', 'visibility');
+      } else {
+        this.updateSessionState('active', 'visibility');
+      }
+    });
+
+    // Exit detection
     addEventListener('beforeunload', (e) => {
+      // Send beacon for reliable delivery
+      const userId = this.user.role === 'host' ? this.user.uid : this.user.phone;
+      const success = apiClient.sendBeacon(userId, 'closing', 'beforeunload');
+      
+      if (success) {
+        console.log('Exit beacon sent successfully');
+      } else {
+        console.warn('Exit beacon failed to send');
+      }
+      
       e.preventDefault();
       e.returnValue = 'Are you sure you want to leave?';
     });
@@ -206,6 +225,15 @@ class WebinarApp {
     
     const config = configs[status];
     statusEl.innerHTML = `<i class="fas ${config.icon}"></i> <span>${config.text}</span>`;
+  }
+
+  async updateSessionState(state, source) {
+    try {
+      await apiClient.updateSessionState({ state, source });
+      console.log(`Session state updated: ${state} (${source})`);
+    } catch (error) {
+      console.warn('Failed to update session state:', error);
+    }
   }
 
   watchForSessionEnd() {
