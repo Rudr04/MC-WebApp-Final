@@ -18,12 +18,14 @@ module.exports = {
   // Firebase paths
   FIREBASE_PATHS: {
     WHITELIST: 'whitelist',
-    ACTIVE_HOSTS: 'activeHosts',
-    ACTIVE_HOST_COUNT: 'activeHostCount',
-    ACTIVE_SESSIONS: 'activeSessions',
-    ACTIVE_PARTICIPANT_COUNT: 'activeParticipantCount',
     USERS: 'users',
-    SESSION_ENDED: 'sessionEnded'
+    SESSION_ENDED: 'sessionEnded',
+    ACTIVE_USERS: 'activeUsers',
+    ACTIVE_USERS_HOSTS: 'activeUsers/hosts',
+    ACTIVE_USERS_PARTICIPANTS: 'activeUsers/participants',
+    ACTIVE_USERS_COUNTS: 'activeUsers/counts',
+    ACTIVE_USERS_COUNTS_HOSTS: 'activeUsers/counts/hosts',
+    ACTIVE_USERS_COUNTS_PARTICIPANTS: 'activeUsers/counts/participants'
   },
   
   // Response messages

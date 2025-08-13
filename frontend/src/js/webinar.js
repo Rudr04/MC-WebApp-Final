@@ -2,7 +2,6 @@ class WebinarApp {
   constructor() {
     this.user = null;
     this.uiPermissions = null;
-    this.heartbeatManager = new HeartbeatManager();
   }
 
   async initialize() {
@@ -64,8 +63,6 @@ class WebinarApp {
       await streamPlayer.initialize();
       chatManager.initialize(this.user, this.uiPermissions);
       
-      // Initialize heartbeat manager
-      this.heartbeatManager.initialize(this.user);
       
       // Set up event listeners (after UI injection)
       this.setupEventListeners();
@@ -78,9 +75,26 @@ class WebinarApp {
         console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
         
-        // Only show alert and redirect if it's actually a session error
-        if (error.message && error.message.includes('session')) {
-          alert('Session expired. Please login again.');
+        // Check for authentication errors that require login redirect
+        const authErrors = [
+          'session',
+          'Invalid or expired token',
+          'token',
+          'expired',
+          'unauthorized',
+          'Invalid session'
+        ];
+        
+        const shouldRedirect = authErrors.some(errorType => 
+          error.message && error.message.toLowerCase().includes(errorType.toLowerCase())
+        );
+
+        if (shouldRedirect) {
+          console.log('Authentication error detected, redirecting to login:', error.message);
+          // Clear any stored tokens
+          localStorage.removeItem('webinar_token');
+          sessionStorage.removeItem('firebase_token');
+          // Redirect immediately without alert to avoid showing empty page
           location.href = 'login.html';
         } else {
           // For other errors, log but don't redirect

@@ -138,51 +138,6 @@ class ApiClient {
     return this.request(window.ENDPOINTS.SESSION.END_SESSION, { method: 'POST' });
   }
 
-<<<<<<< Updated upstream
-  async sendHeartbeat(userId, userState, timestamp, isStateChange = false) {
-    return this.request(window.ENDPOINTS.SESSION.HEARTBEAT, {
-      method: 'POST',
-      body: JSON.stringify({
-        userId,
-        userState,
-        timestamp,
-        isStateChange
-      })
-    });
-  }
-
-  async sendBeacon(userId, userState, timestamp) {
-    // Beacon endpoint doesn't use authentication
-    const url = `${this.baseURL}${window.ENDPOINTS.SESSION.BEACON}`;
-    const payload = {
-      userId,
-      userState,
-      timestamp
-    };
-    
-    // Try sendBeacon first, fallback to fetch
-    if (navigator.sendBeacon) {
-      const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
-      return navigator.sendBeacon(url, blob);
-    } else {
-      // Fallback to regular fetch
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-        return response.ok;
-      } catch (error) {
-        console.error('Beacon fallback failed:', error);
-        return false;
-      }
-    }
-  }
-
-=======
   async updateSessionState(data) {
     return this.request(window.ENDPOINTS.SESSION.UPDATE_STATE, {
       method: 'POST',
@@ -190,7 +145,6 @@ class ApiClient {
     });
   }
 
->>>>>>> Stashed changes
   // Chat endpoints
   async sendMessage(message, to) {
     return this.request(window.ENDPOINTS.CHAT.SEND_MESSAGE, {
