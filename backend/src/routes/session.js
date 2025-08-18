@@ -36,74 +36,38 @@ router.get('/status', async (req, res, next) => {
   }
 });
 
-// Heartbeat endpoint (authenticated)
-router.post('/heartbeat', verifyToken, async (req, res, next) => {
+// Update session state (authenticated)
+router.post('/state', verifyToken, async (req, res, next) => {
   try {
-    const { userId, userState, timestamp, isStateChange } = req.body;
-    const user = req.user;
+    const { state, source } = req.body;
+    const { user } = req;
     
-    // Validate input
-    if (!userId || !userState || !timestamp) {
-      return res.status(400).json({ error: 'Missing required heartbeat data' });
+    if (!state || !source) {
+      return res.status(400).json({ error: 'Missing state or source' });
     }
     
-    // Validate user state
-    const validStates = ['active', 'idle', 'background'];
-    if (!validStates.includes(userState)) {
-      return res.status(400).json({ error: 'Invalid user state' });
-    }
-    
-    // Ensure user can only update their own heartbeat
-    const expectedUserId = user.uid || user.phone;
-    if (userId !== expectedUserId) {
-      return res.status(403).json({ error: 'Cannot update heartbeat for other users' });
-    }
-    
-    // Update heartbeat in Firebase
-    const userPath = `users/${userId}`;
-    await db.ref(userPath).update({
-      lastHeartbeat: timestamp,
-      userState: userState,
-      lastStateChange: isStateChange ? timestamp : null
-    });
-    
-    logger.info(`Heartbeat updated for ${user.name || userId}: ${userState}${isStateChange ? ' (state change)' : ''}`);
-    
-    res.json({ success: true, timestamp: Date.now() });
-    
+    await sessionService.updateUserState(user, state, source);
+    res.json({ success: true });
   } catch (error) {
-    logger.error('Heartbeat error:', error);
     next(error);
   }
 });
 
-// Beacon endpoint (no auth - for page unload)
+// Beacon endpoint for beforeunload (no auth)
 router.post('/beacon', async (req, res, next) => {
   try {
-    const { userId, userState, timestamp } = req.body;
+    const { userId, state, source } = req.body;
     
-    // Validate input
-    if (!userId || !timestamp) {
-      return res.status(400).json({ error: 'Missing required beacon data' });
+    if (!userId || !state || !source) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
     
-    // Mark session for immediate cleanup
-    const userPath = `users/${userId}`;
-    await db.ref(userPath).update({
-      lastHeartbeat: timestamp,
-      userState: userState || 'offline',
-      beaconReceived: true,
-      beaconTimestamp: timestamp
-    });
-    
-    logger.info(`Beacon received for ${userId}: marked for cleanup`);
-    
+    await sessionService.updateUserStateByUserId(userId, state, source);
     res.json({ success: true });
-    
   } catch (error) {
-    logger.error('Beacon error:', error);
-    // Don't use next(error) for beacon as it might not complete
-    res.status(500).json({ error: 'Beacon processing failed' });
+    console.error('Beacon error:', error);
+    // Always return success for beacon to avoid retries
+    res.json({ success: true });
   }
 });
 

@@ -46,29 +46,44 @@ class AuthService {
       // Initialize paths if they don't exist
       if (!current[FIREBASE_PATHS.ACTIVE_HOSTS]) current[FIREBASE_PATHS.ACTIVE_HOSTS] = {};
       if (!current[FIREBASE_PATHS.USERS]) current[FIREBASE_PATHS.USERS] = {};
+      if (!current[FIREBASE_PATHS.ACTIVE_USERS]) current[FIREBASE_PATHS.ACTIVE_USERS] = {};
+      if (!current[FIREBASE_PATHS.ACTIVE_USERS].hosts) current[FIREBASE_PATHS.ACTIVE_USERS].hosts = {};
       
-      // Set host data
-      current[FIREBASE_PATHS.ACTIVE_HOSTS][user.uid] = {
-        ...user,
-        timestamp: Date.now()
+      // Set host data with state tracking
+      current[FIREBASE_PATHS.ACTIVE_USERS].hosts[user.uid] = {
+        state: 'active',
+        stateUpdatedAt: Date.now(),
+        stateSource: 'login',
+        lastSeen: Date.now()
       };
       
       // Set user data with heartbeat fields
       current[FIREBASE_PATHS.USERS][user.uid] = {
         ...user,
-        timestamp: Date.now(),
-        lastHeartbeat: Date.now(),
-        userState: 'active'
+        timestamp: Date.now()
       };
       
       // Clear session ended flag
       current[FIREBASE_PATHS.SESSION_ENDED] = false;
       
       // Increment active host count atomically with host list update
-      current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] = (current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] || 0) + 1;
+      if (!current[FIREBASE_PATHS.ACTIVE_USERS].counts) current[FIREBASE_PATHS.ACTIVE_USERS].counts = {};
+      current[FIREBASE_PATHS.ACTIVE_USERS].counts.hosts = (current[FIREBASE_PATHS.ACTIVE_USERS].counts.hosts || 0) + 1;
       
       return current;
     });
+
+    // Set up onDisconnect for host
+    const hostRef = db.ref(`${FIREBASE_PATHS.ACTIVE_USERS_HOSTS}/${user.uid}`);
+    await hostRef.onDisconnect().update({
+      state: 'offline',
+      stateUpdatedAt: admin.database.ServerValue.TIMESTAMP,
+      stateSource: 'connection'
+    });
+    
+    // Set up counter decrement on disconnect
+    const hostCounterRef = db.ref(FIREBASE_PATHS.ACTIVE_USERS_COUNTS_HOSTS);
+    // Note: onDisconnect doesn't support transactions, we'll handle counter consistency via other means
 
     // PARALLEL OPERATION: JWT and Firebase token generation are independent
     // These can be done simultaneously to improve performance
@@ -114,13 +129,13 @@ class AuthService {
     }
 
     // Check if already in session
-    const activeSession = await db.ref(`${FIREBASE_PATHS.ACTIVE_SESSIONS}/${phone}`).once('value');
+    const activeSession = await db.ref(`${FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS}/${phone}`).once('value');
     if (activeSession.exists()) {
       throw new Error(MESSAGES.ERROR.ALREADY_IN_SESSION);
     }
 
     // Check if any host is active
-    const hostCount = await db.ref('activeHostCount').once('value');
+    const hostCount = await db.ref(FIREBASE_PATHS.ACTIVE_USERS_COUNTS_HOSTS).once('value');
     if (!hostCount.exists() || hostCount.val() <= 0) {
       throw new Error(MESSAGES.ERROR.NO_ACTIVE_SESSION);
     }
@@ -138,30 +153,47 @@ class AuthService {
       if (current === null) current = {};
       
       // Double-check session doesn't exist (race condition protection)
-      if (current[FIREBASE_PATHS.ACTIVE_SESSIONS] && current[FIREBASE_PATHS.ACTIVE_SESSIONS][phone]) {
+      if (current[FIREBASE_PATHS.ACTIVE_USERS] && current[FIREBASE_PATHS.ACTIVE_USERS].participants && current[FIREBASE_PATHS.ACTIVE_USERS].participants[phone]) {
         throw new Error(MESSAGES.ERROR.ALREADY_IN_SESSION);
       }
       
       // Initialize paths if they don't exist
-      if (!current[FIREBASE_PATHS.ACTIVE_SESSIONS]) current[FIREBASE_PATHS.ACTIVE_SESSIONS] = {};
       if (!current[FIREBASE_PATHS.USERS]) current[FIREBASE_PATHS.USERS] = {};
+      if (!current[FIREBASE_PATHS.ACTIVE_USERS]) current[FIREBASE_PATHS.ACTIVE_USERS] = {};
+      if (!current[FIREBASE_PATHS.ACTIVE_USERS].participants) current[FIREBASE_PATHS.ACTIVE_USERS].participants = {};
       
-      // Create session
-      current[FIREBASE_PATHS.ACTIVE_SESSIONS][phone] = true;
+      // Create participant session with state tracking
+      current[FIREBASE_PATHS.ACTIVE_USERS].participants[phone] = {
+        state: 'active',
+        stateUpdatedAt: Date.now(),
+        stateSource: 'login',
+        lastSeen: Date.now()
+      };
       
       // Create user data with heartbeat fields
       current[FIREBASE_PATHS.USERS][phone] = {
         ...user,
-        timestamp: Date.now(),
-        lastHeartbeat: Date.now(),
-        userState: 'active'
+        timestamp: Date.now()
       };
       
       // Increment participant count atomically with session creation
-      current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] = (current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] || 0) + 1;
+      if (!current[FIREBASE_PATHS.ACTIVE_USERS].counts) current[FIREBASE_PATHS.ACTIVE_USERS].counts = {};
+      current[FIREBASE_PATHS.ACTIVE_USERS].counts.participants = (current[FIREBASE_PATHS.ACTIVE_USERS].counts.participants || 0) + 1;
       
       return current;
     });
+
+    // Set up onDisconnect for participant
+    const participantRef = db.ref(`${FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS}/${phone}`);
+    await participantRef.onDisconnect().update({
+      state: 'offline',
+      stateUpdatedAt: admin.database.ServerValue.TIMESTAMP,
+      stateSource: 'connection'
+    });
+    
+    // Set up counter decrement on disconnect
+    const participantCounterRef = db.ref(FIREBASE_PATHS.ACTIVE_USERS_COUNTS_PARTICIPANTS);
+    // Note: onDisconnect doesn't support transactions, we'll handle counter consistency via other means
 
     const sanitizedPhone = phone.replace(/[^0-9]/g, '');
     const participantUid = `participant_${sanitizedPhone}`; //sanitize before passing for token generation firebase
@@ -195,6 +227,65 @@ class AuthService {
         logger.warn('Could not generate Firebase token during verify:', error.message);
       }
 
+      // Update user state to active if not already active (handles tab restore)
+      const userType = decoded.role === 'host' ? 'hosts' : 'participants';
+      const userId = decoded.role === 'host' ? decoded.uid : decoded.phone;
+      
+      console.log(`verifySession: Starting state update for ${userType} ${userId}`);
+      
+      try {
+        console.log(`verifySession: Attempting transaction for ${userType} ${userId}`);
+        await db.ref().transaction((data) => {
+          console.log(`verifySession: Transaction callback started for ${userType} ${userId}`);
+          if (!data) data = {};
+          
+          // Initialize paths
+          if (!data.activeUsers) data.activeUsers = {};
+          if (!data.activeUsers[userType]) data.activeUsers[userType] = {};
+          if (!data.activeUsers.counts) data.activeUsers.counts = {};
+          if (!data.activeUsers.counts[userType]) data.activeUsers.counts[userType] = 0;
+          
+          const currentUser = data.activeUsers[userType][userId];
+          const currentState = currentUser?.state;
+          
+          console.log(`verifySession: Found user ${userId}, currentState: ${currentState || 'undefined'}, exists: ${!!currentUser}`);
+          
+          // Apply proper counter logic for verifySession
+          if (currentUser) {
+            console.log(`verifySession: Processing existing user ${userId} with state ${currentState}`);
+            // Always update user state to active - use clean structure
+            data.activeUsers[userType][userId] = {
+              state: 'active',
+              stateUpdatedAt: Date.now(),
+              stateSource: 'verifySession',
+              lastSeen: Date.now()
+            };
+            
+            // Only increment counter if coming from offline state
+            const connectedStates = ['active', 'background', 'closing'];
+            const wasConnected = currentState && connectedStates.includes(currentState);
+            
+            console.log(`verifySession: wasConnected = ${wasConnected}, connectedStates = [${connectedStates.join(', ')}]`);
+            
+            if (!wasConnected) {
+              // User was offline, now connecting via verifySession
+              const oldCount = data.activeUsers.counts[userType] || 0;
+              data.activeUsers.counts[userType] = oldCount + 1;
+              console.log(`verifySession: Counter changed +1 for ${userType}: ${currentState || 'unknown'} → active via verifySession. New count: ${data.activeUsers.counts[userType]}`);
+            } else {
+              // User was already connected (tab refresh, page reload, etc.)
+              console.log(`verifySession: Counter unchanged for ${userType}: ${currentState} → active via verifySession (already connected)`);
+            }
+          } else {
+            console.log(`verifySession: No currentUser found for ${userId}, skipping counter logic`);
+          }
+          
+          return data;
+        });
+      } catch (error) {
+        logger.warn('Could not update user state during verify:', error.message);
+      }
+
       return {
         valid: true, 
         user: decoded,
@@ -216,11 +307,12 @@ class AuthService {
           if (current === null) current = {};
           
           // Remove session if it exists
-          if (current[FIREBASE_PATHS.ACTIVE_SESSIONS] && current[FIREBASE_PATHS.ACTIVE_SESSIONS][decoded.phone]) {
-            delete current[FIREBASE_PATHS.ACTIVE_SESSIONS][decoded.phone];
+          if (current[FIREBASE_PATHS.ACTIVE_USERS] && current[FIREBASE_PATHS.ACTIVE_USERS].participants && current[FIREBASE_PATHS.ACTIVE_USERS].participants[decoded.phone]) {
+            delete current[FIREBASE_PATHS.ACTIVE_USERS].participants[decoded.phone];
             
             // Decrement participant count atomically with session removal
-            current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] = Math.max(0, (current[FIREBASE_PATHS.ACTIVE_PARTICIPANT_COUNT] || 0) - 1);
+            if (!current[FIREBASE_PATHS.ACTIVE_USERS].counts) current[FIREBASE_PATHS.ACTIVE_USERS].counts = {};
+            current[FIREBASE_PATHS.ACTIVE_USERS].counts.participants = Math.max(0, (current[FIREBASE_PATHS.ACTIVE_USERS].counts.participants || 0) - 1);
           }
           
           return current;
@@ -232,11 +324,12 @@ class AuthService {
           if (current === null) current = {};
           
           // Remove host if it exists
-          if (current[FIREBASE_PATHS.ACTIVE_HOSTS] && current[FIREBASE_PATHS.ACTIVE_HOSTS][decoded.uid]) {
-            delete current[FIREBASE_PATHS.ACTIVE_HOSTS][decoded.uid];
+          if (current[FIREBASE_PATHS.ACTIVE_USERS] && current[FIREBASE_PATHS.ACTIVE_USERS].hosts && current[FIREBASE_PATHS.ACTIVE_USERS].hosts[decoded.uid]) {
+            delete current[FIREBASE_PATHS.ACTIVE_USERS].hosts[decoded.uid];
             
             // Decrement host count atomically with host removal
-            current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] = Math.max(0, (current[FIREBASE_PATHS.ACTIVE_HOST_COUNT] || 0) - 1);
+            if (!current[FIREBASE_PATHS.ACTIVE_USERS].counts) current[FIREBASE_PATHS.ACTIVE_USERS].counts = {};
+            current[FIREBASE_PATHS.ACTIVE_USERS].counts.hosts = Math.max(0, (current[FIREBASE_PATHS.ACTIVE_USERS].counts.hosts || 0) - 1);
           }
           
           return current;

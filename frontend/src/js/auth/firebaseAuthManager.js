@@ -236,9 +236,14 @@ class FirebaseAuthManager {
         this.tryReauthenticate();
       }
       
+      // Update session state when connected
+      if (isConnected && this.isAuthenticated && window.webinarApp) {
+        window.webinarApp.updateSessionState('active', 'connection');
+      }
+      
       // Update UI connection status
-      if (window.updateConnectionStatus) {
-        window.updateConnectionStatus(isConnected ? 'connected' : 'disconnected');
+      if (window.webinarApp && window.webinarApp.updateConnectionStatus) {
+        window.webinarApp.updateConnectionStatus(isConnected ? 'connected' : 'disconnected');
       }
     });
   }

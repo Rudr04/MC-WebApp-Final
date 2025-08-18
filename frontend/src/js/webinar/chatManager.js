@@ -240,8 +240,8 @@ class ChatManager {
   }
 
   async updateParticipantCount() {
-    // Use activeParticipantCount for better performance
-    const activeParticipantCountRef = this.database.ref('activeParticipantCount');
+    // Use activeUsers/counts/participants for better performance
+    const activeParticipantCountRef = this.database.ref('activeUsers/counts/participants');
     
     activeParticipantCountRef.on('value', (snapshot) => {
       const count = snapshot.val() || 0;

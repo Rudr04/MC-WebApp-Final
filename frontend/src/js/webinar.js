@@ -2,7 +2,6 @@ class WebinarApp {
   constructor() {
     this.user = null;
     this.uiPermissions = null;
-    this.heartbeatManager = new HeartbeatManager();
   }
 
   async initialize() {
@@ -64,8 +63,6 @@ class WebinarApp {
       await streamPlayer.initialize();
       chatManager.initialize(this.user, this.uiPermissions);
       
-      // Initialize heartbeat manager
-      this.heartbeatManager.initialize(this.user);
       
       // Set up event listeners (after UI injection)
       this.setupEventListeners();
@@ -78,9 +75,26 @@ class WebinarApp {
         console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
         
-        // Only show alert and redirect if it's actually a session error
-        if (error.message && error.message.includes('session')) {
-          alert('Session expired. Please login again.');
+        // Check for authentication errors that require login redirect
+        const authErrors = [
+          'session',
+          'Invalid or expired token',
+          'token',
+          'expired',
+          'unauthorized',
+          'Invalid session'
+        ];
+        
+        const shouldRedirect = authErrors.some(errorType => 
+          error.message && error.message.toLowerCase().includes(errorType.toLowerCase())
+        );
+
+        if (shouldRedirect) {
+          console.log('Authentication error detected, redirecting to login:', error.message);
+          // Clear any stored tokens
+          localStorage.removeItem('webinar_token');
+          sessionStorage.removeItem('firebase_token');
+          // Redirect immediately without alert to avoid showing empty page
           location.href = 'login.html';
         } else {
           // For other errors, log but don't redirect
@@ -182,8 +196,27 @@ class WebinarApp {
     addEventListener('online', () => this.updateConnectionStatus('connected'));
     addEventListener('offline', () => this.updateConnectionStatus('disconnected'));
     
-    // Prevent accidental refresh
+    // Visibility tracking
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        this.updateSessionState('background', 'visibility');
+      } else {
+        this.updateSessionState('active', 'visibility');
+      }
+    });
+
+    // Exit detection
     addEventListener('beforeunload', (e) => {
+      // Send beacon for reliable delivery
+      const userId = this.user.role === 'host' ? this.user.uid : this.user.phone;
+      const success = apiClient.sendBeacon(userId, 'closing', 'beforeunload');
+      
+      if (success) {
+        console.log('Exit beacon sent successfully');
+      } else {
+        console.warn('Exit beacon failed to send');
+      }
+      
       e.preventDefault();
       e.returnValue = 'Are you sure you want to leave?';
     });
@@ -206,6 +239,15 @@ class WebinarApp {
     
     const config = configs[status];
     statusEl.innerHTML = `<i class="fas ${config.icon}"></i> <span>${config.text}</span>`;
+  }
+
+  async updateSessionState(state, source) {
+    try {
+      await apiClient.updateSessionState({ state, source });
+      console.log(`Session state updated: ${state} (${source})`);
+    } catch (error) {
+      console.warn('Failed to update session state:', error);
+    }
   }
 
   watchForSessionEnd() {
