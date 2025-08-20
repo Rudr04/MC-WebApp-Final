@@ -1,26 +1,54 @@
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /messages/{messageId} {
-      // Read rules: Allow authenticated users to read messages
-      allow read: if request.auth != null && (
-        // Public messages (visible to all)
-        resource.data.visibility.hasAny(['all']) ||
-        // Private messages (visible to sender/recipient)
-        (request.auth.token.phone != null && resource.data.visibility.hasAny([request.auth.token.phone])) ||
-        (request.auth.token.email != null && resource.data.visibility.hasAny([request.auth.token.email])) ||
-        // Hosts can see all messages
-        (request.auth.token.role != null && request.auth.token.role in ['host', 'co-host'])
-      );
-      
-      // Write rules: Allow authenticated users to create messages
-      allow create: if request.auth != null &&
-        request.resource.data.keys().hasAll(['from', 'fromId', 'to', 'text', 'timestamp', 'visibility']) &&
-        request.resource.data.visibility is list &&
-        request.resource.data.visibility.size() > 0;
-      
-      // Prevent message editing/deletion for immutability
-      allow update, delete: if false;
+{
+  "rules": {
+    "whitelist": {
+      ".read": false,
+      ".write": false,
+    },
+    "users": {
+      ".read": "auth != null && (auth.token.role == 'host' || auth.token.role == 'co-host')",
+      ".write": false,
+      ".indexOn": "role"
+    },
+    "sessionEnded": {
+      ".read": true,
+      ".write": "auth != null && auth.token.role == 'host'"
+    },
+    "activeUsers": {
+      ".read": "auth != null",
+      "hosts": {
+        ".indexOn": ["state", "stateSource", "stateUpdatedAt", "lastSeen"],
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.token.role == 'host' || auth.token.role == 'co-host')",
+        "$hostId": {
+          ".write": "auth != null && (
+            // Allow hosts to update their own record
+            (auth.token.role == 'host' || auth.token.role == 'co-host') && auth.uid == $hostId
+          )"
+        }
+      },
+      "participants": {
+				".indexOn": ["state", "stateUpdatedAt", "lastSeen"],
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$participantId": {
+          ".write": "auth != null && (
+            // Allow participants to update their own record
+            auth.token.phone == $participantId ||
+            // Allow hosts to update any participant record
+            auth.token.role == 'host' || auth.token.role == 'co-host'
+          )"
+        }
+      },
+      "counts": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "hosts": {
+          ".write": "auth != null && (auth.token.role == 'host' || auth.token.role == 'co-host')"
+        },
+        "participants": {
+          ".write": "auth != null"
+        }
+      }
     }
   }
 }
