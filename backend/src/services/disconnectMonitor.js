@@ -5,8 +5,10 @@ const { logger } = require('../utils/logger');
 class DisconnectMonitor {
   constructor() {
     this.processedUsers = new Set();
-    this.hostsRef = null;
-    this.participantsRef = null;
+    this.hostsOfflineRef = null;
+    this.participantsOfflineRef = null;
+    this.hostsConnectionRef = null;
+    this.participantsConnectionRef = null;
     this.isRunning = false;
   }
 
@@ -18,44 +20,56 @@ class DisconnectMonitor {
 
     logger.info('Starting DisconnectMonitor service');
     
-    // Listen to both hosts and participants paths
-    this.hostsRef = db.ref(FIREBASE_PATHS.ACTIVE_USERS_HOSTS);
-    this.participantsRef = db.ref(FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS);
-    
-    // Set up listeners for hosts
-    this.hostsRef.on('child_changed', (snapshot) => {
-      const userId = snapshot.key;
-      const userData = snapshot.val();
-      
-      // Check if user went offline due to connection loss
-      if (userData && 
-          userData.state === 'offline' && 
-          userData.stateSource === 'connection' &&
-          !this.processedUsers.has(userId)) {
-        
-        logger.info(`Detected host disconnect for user: ${userId}`);
-        this.handleDisconnect(userId, userData, 'hosts');
-      }
-    });
-
-    // Set up listeners for participants
-    this.participantsRef.on('child_changed', (snapshot) => {
-      const userId = snapshot.key;
-      const userData = snapshot.val();
-      
-      // Check if user went offline due to connection loss
-      if (userData && 
-          userData.state === 'offline' && 
-          userData.stateSource === 'connection' &&
-          !this.processedUsers.has(userId)) {
-        
-        logger.info(`Detected participant disconnect for user: ${userId}`);
-        this.handleDisconnect(userId, userData, 'participants');
-      }
-    });
+    // Set up indexed listeners for offline users with connection source
+    this.setupOfflineConnectionListeners('hosts');
+    this.setupOfflineConnectionListeners('participants');
 
     this.isRunning = true;
     logger.info('DisconnectMonitor service started successfully');
+  }
+
+  setupOfflineConnectionListeners(userType) {
+    logger.debug(`Setting up offline connection listeners for ${userType}`);
+    
+    // Listen for users going offline due to connection loss
+    const offlineRef = db.ref(`${FIREBASE_PATHS.ACTIVE_USERS}/${userType}`)
+      .orderByChild('state')
+      .equalTo('offline');
+    
+    // Store refs for cleanup
+    if (userType === 'hosts') {
+      this.hostsOfflineRef = offlineRef;
+    } else {
+      this.participantsOfflineRef = offlineRef;
+    }
+
+    offlineRef.on('child_added', (snapshot) => {
+      const userId = snapshot.key;
+      const userData = snapshot.val();
+      
+      // Check if this is a connection-related offline state
+      if (userData && 
+          userData.stateSource === 'connection' &&
+          !this.processedUsers.has(userId)) {
+        
+        logger.info(`Detected ${userType.slice(0, -1)} disconnect for user: ${userId}`);
+        this.handleDisconnect(userId, userData, userType);
+      }
+    });
+
+    offlineRef.on('child_changed', (snapshot) => {
+      const userId = snapshot.key;
+      const userData = snapshot.val();
+      
+      // Check if user went offline due to connection loss
+      if (userData && 
+          userData.stateSource === 'connection' &&
+          !this.processedUsers.has(userId)) {
+        
+        logger.info(`Detected ${userType.slice(0, -1)} state change to offline for user: ${userId}`);
+        this.handleDisconnect(userId, userData, userType);
+      }
+    });
   }
 
   async handleDisconnect(userId, userData, userType) {
@@ -124,14 +138,26 @@ class DisconnectMonitor {
 
     logger.info('Stopping DisconnectMonitor service');
     
-    if (this.hostsRef) {
-      this.hostsRef.off('child_changed');
-      this.hostsRef = null;
+    // Clean up hosts refs
+    if (this.hostsOfflineRef) {
+      this.hostsOfflineRef.off();
+      this.hostsOfflineRef = null;
+    }
+    
+    if (this.hostsConnectionRef) {
+      this.hostsConnectionRef.off();
+      this.hostsConnectionRef = null;
     }
 
-    if (this.participantsRef) {
-      this.participantsRef.off('child_changed');
-      this.participantsRef = null;
+    // Clean up participants refs
+    if (this.participantsOfflineRef) {
+      this.participantsOfflineRef.off();
+      this.participantsOfflineRef = null;
+    }
+    
+    if (this.participantsConnectionRef) {
+      this.participantsConnectionRef.off();
+      this.participantsConnectionRef = null;
     }
 
     this.processedUsers.clear();

@@ -1,0 +1,39 @@
+version: '3.8'
+services:
+  webinar-backend:
+    build: ./backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - ./backend/.env.production
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  webinar-frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    depends_on:
+      - webinar-backend
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - webinar-backend
+      - webinar-frontend
+    restart: unless-stopped

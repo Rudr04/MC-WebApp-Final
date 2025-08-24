@@ -4,9 +4,12 @@
   "description": "Secure backend for webinar platform",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "NODE_ENV=production node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "jest"
+    "test": "jest",
+    "build": "echo 'No build step required for backend'",
+    "lint": "echo 'Add ESLint for production'",
+    "prod:start": "NODE_ENV=production PM2_HOME=/tmp pm2 start src/index.js --name webinar-backend"
   },
   "dependencies": {
     "compression": "^1.8.0",

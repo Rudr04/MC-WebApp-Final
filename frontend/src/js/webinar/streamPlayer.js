@@ -55,6 +55,12 @@ class StreamPlayer {
     document.getElementById('loadingIndicator').style.display = 'none';
     this.retryCount = 0;
     
+    // Disable tab navigation to the iframe
+    const iframe = document.querySelector('#player');
+    if (iframe) {
+        iframe.setAttribute('tabindex', '-1');
+    }
+
     try {
       event.target.mute();
       event.target.playVideo();

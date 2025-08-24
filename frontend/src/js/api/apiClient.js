@@ -1,6 +1,9 @@
 class ApiClient {
   constructor() {
-    this.baseURL = 'http://localhost:3001';
+    // Use environment-specific API URL
+    this.baseURL = window.location.hostname === 'localhost' 
+      ? 'http://localhost:3001' 
+      : `https://${window.location.hostname.replace('www.', '')}:3001`;
     // Don't load token in constructor - load it dynamically
   }
 
@@ -118,6 +121,11 @@ class ApiClient {
   async verifySession() {
     console.log('Verifying session...');
     return this.request(window.ENDPOINTS.AUTH.VERIFY_SESSION);
+  }
+
+  async refreshFirebaseToken() {
+    console.log('Refreshing Firebase token...');
+    return this.request('/api/auth/refresh-token');
   }
 
   async logout() {

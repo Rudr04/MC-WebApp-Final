@@ -10,7 +10,7 @@ class ChatManager {
     this.participantsMap = new Map();
   }
 
-  initialize(user, uiPermissions = {}) {
+  async initialize(user, uiPermissions = {}) {
     this.currentUser = user;
     this.uiPermissions = uiPermissions;
     
@@ -23,19 +23,23 @@ class ChatManager {
       console.warn('Firebase not authenticated, chat features may be limited');
     }
     
-    // Set up listeners
-    this.setupMessageListener();
-    this.updateParticipantCount(); // Still uses RTDB
-    
     // Load participants if user has recipient selection permissions
     if (this.uiPermissions.canSelectRecipients) {
-      this.loadParticipantsList(); // Still uses RTDB
+      console.log('Loading participants list for recipient selection...');
+      await this.loadParticipantsList(); // Wait for participants data
+      console.log('Participants list loaded and map populated');
       // Check if recipientSelector exists (might be injected after this call)
       const recipientSelector = document.getElementById('recipientSelector');
       if (recipientSelector) {
         recipientSelector.style.display = 'block';
       }
     }
+    
+    // Set up listeners (after participants are loaded)
+    console.log('Setting up chat message listener...');
+    this.setupMessageListener();
+    console.log('message listener setup complete');
+    this.updateParticipantCount(); // Still uses RTDB
   }
 
   getParticipantName(phoneOrId) {
@@ -148,7 +152,7 @@ class ChatManager {
     const [senderRole, ...senderNameParts] = message.from.split(':');
     const senderName = senderNameParts.join(':') || 'Unknown';
     const isHost = message.from.startsWith('host:') || message.from.startsWith('co-host:');
-    const isPrivate = message.to !== 'all';
+    const isPrivate = message.to !== 'all' && message.to !== 'host';
     const senderId = message.fromId; // Phone number of sender
     
     // Get recipient display name
@@ -165,7 +169,7 @@ class ChatManager {
           <i class="fas fa-${isHost ? 'crown' : 'user'}"></i>
           ${senderName}
         </span>`
-      : `<i class="fas fa-${isHost ? 'crown' : 'user'}"></i> ${senderName}`;
+      : `<i class="fas fa-${isHost ? 'crown' : 'user'} style="cursor: text;"></i> ${senderName}`;
 
       messageEl.innerHTML = `
       <div class="message-sender">
@@ -251,26 +255,63 @@ class ChatManager {
   }
 
   async loadParticipantsList() {
-    // Keep using RTDB for user data
-    const participantsRef = this.database.ref('users').orderByChild('role').equalTo('participant');
-    
-    participantsRef.on('value', (snapshot) => {
-      const participants = [];
-      snapshot.forEach(child => {
-        const data = child.val();
-        participants.push({
+    return new Promise((resolve) => {
+      // Keep using RTDB for user data
+      const participantsRef = this.database.ref('users').orderByChild('role').equalTo('participant');
+      
+      participantsRef.once('value', (snapshot) => {
+        const participants = [];
+        // Clear and repopulate participants map
+        this.participantsMap.clear();
+        
+        snapshot.forEach(child => {
+          const data = child.val();
+          const participant = {
             id: child.key,
             name: data.name,
-          });
-      });
-      
-      const select = document.getElementById('recipientSelect');
-      if (select) {
-        select.innerHTML = '<option value="all">All Participants</option>';
-        participants.forEach(participant => {
-          select.innerHTML += `<option value="${participant.id}">${participant.name}</option>`;
+          };
+          participants.push(participant);
+          
+          // Populate the participants map for name lookup
+          this.participantsMap.set(participant.id, participant.name);
         });
-      }
+        
+        console.log('Participants map updated:', this.participantsMap);
+        
+        const select = document.getElementById('recipientSelect');
+        if (select) {
+          select.innerHTML = '<option value="all">All Participants</option>';
+          participants.forEach(participant => {
+            select.innerHTML += `<option value="${participant.id}">${participant.name}</option>`;
+          });
+        }
+        
+        // Set up continuous listener for updates after initial load
+        participantsRef.on('value', (snapshot) => {
+          const participants = [];
+          this.participantsMap.clear();
+          
+          snapshot.forEach(child => {
+            const data = child.val();
+            const participant = {
+              id: child.key,
+              name: data.name,
+            };
+            participants.push(participant);
+            this.participantsMap.set(participant.id, participant.name);
+          });
+          
+          const select = document.getElementById('recipientSelect');
+          if (select) {
+            select.innerHTML = '<option value="all">All Participants</option>';
+            participants.forEach(participant => {
+              select.innerHTML += `<option value="${participant.id}">${participant.name}</option>`;
+            });
+          }
+        });
+        
+        resolve();
+      });
     });
   }
 

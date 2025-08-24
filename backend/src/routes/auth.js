@@ -60,6 +60,19 @@ router.get('/verify', verifyToken, async (req, res, next) => {
   }
 });
 
+// Refresh Firebase token
+router.get('/refresh-token', verifyToken, async (req, res, next) => {
+  try {
+    const firebaseToken = await authService.generateFirebaseToken(req.user.uid, req.user);
+    res.json({ 
+      firebaseToken,
+      message: 'Token refreshed successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Logout
 router.post('/logout', async (req, res, next) => {
   try {

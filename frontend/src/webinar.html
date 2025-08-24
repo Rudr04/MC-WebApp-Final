@@ -14,6 +14,12 @@
         <img src="../public/assets/images/CG_App_Icon.png" alt="Cosmo" class="logo-symbol">
         <span style="color: var(--accent-color);">MasterClass</span>
       </div>
+      <div class="header-actions">
+        <button class="exit-btn header-btn" id="exitBtn">
+          <i class="fas fa-sign-out-alt"></i> Exit
+        </button>
+        <!-- End button will be injected here for hosts only -->
+      </div>
     </div>
   </header>
 
@@ -70,16 +76,11 @@
         <div id="messagesList"></div>
       </div>
 
-      <input type="text" id="messageInput" class="message-input" placeholder="Type your message..." maxlength="500">
-      
-      <div class="message-input-container">
-        <button class="send-btn">
+      <div class="message-input-wrapper">
+        <textarea id="messageInput" class="message-input-field" 
+                  placeholder="Type your message..." rows="1" maxlength="500"></textarea>
+        <button class="send-btn-inline" id="sendBtn" style="display:none">
           <i class="fas fa-paper-plane"></i>
-          Send
-        </button>
-        <button class="exit-btn">
-          <i class="fas fa-sign-out-alt"></i>
-          Exit
         </button>
       </div>
     </section>
@@ -95,12 +96,14 @@
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <script src="js/config/firebase.js"></script>
   <script src="js/auth/firebaseAuthManager.js"></script>
   
   <!-- Application Scripts -->
   <script src="js/api/endpoints.js"></script>
   <script src="js/api/apiClient.js"></script>
   <script src="js/utils/helpers.js"></script>
+  <script src="js/utils/confirmModal.js"></script>
   <script src="js/webinar/streamPlayer.js"></script>
   <script src="js/webinar/chatManager.js"></script>
   <script src="js/webinar.js"></script>

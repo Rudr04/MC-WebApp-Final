@@ -9,6 +9,9 @@ class FirebaseAuthManager {
     this.currentUser = null;
     this.authStateListeners = [];
     this.reconnectTimer = null;
+    this.tokenIssuedAt = null;
+    this.tokenExpiryTime = null;
+    this.refreshTimer = null;
   }
 
   /**
@@ -16,8 +19,8 @@ class FirebaseAuthManager {
    */
   initialize() {
     if (!firebase.apps.length) {
-      firebase.initializeApp({
-        apiKey: "AIzaSyA4z-ifjabIh4bJBBsBJeuDfIkyMkoRHAE",
+      firebase.initializeApp(window.FIREBASE_CONFIG || {
+        apiKey: "AIzaSyA4z-ifjabIh4bJBBsBJeuDfIkyMkoRHAE", // Fallback for localhost
         databaseURL: "https://cosmoguru-server-default-rtdb.firebaseio.com",
         projectId: "cosmoguru-server"
       });
@@ -57,6 +60,11 @@ class FirebaseAuthManager {
       
       // Store token for reconnection
       this.storeFirebaseToken(firebaseToken);
+      
+      // Track token issue time and schedule proactive refresh
+      this.tokenIssuedAt = Date.now();
+      this.tokenExpiryTime = this.tokenIssuedAt + (60 * 60 * 1000); // 1 hour
+      this.scheduleTokenRefresh();
       
       return true;
     } catch (error) {
@@ -190,21 +198,70 @@ class FirebaseAuthManager {
   }
 
   /**
+   * Schedule proactive token refresh
+   */
+  scheduleTokenRefresh() {
+    // Clear any existing timer
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+    
+    // Schedule refresh for 55 minutes (5 min safety buffer)
+    // For testing: use 2 minutes instead
+    const refreshDelay = 55 * 60 * 1000; // 55 minutes in production
+    // const refreshDelay = 2 * 60 * 1000; // 2 minutes for testing
+    
+    this.refreshTimer = setTimeout(() => {
+      console.log('Proactively refreshing Firebase token...');
+      this.refreshFirebaseToken();
+    }, refreshDelay);
+    
+    console.log(`Firebase token refresh scheduled for ${new Date(Date.now() + refreshDelay).toLocaleTimeString()}`);
+  }
+
+  /**
+   * Check if token is expired or expiring soon
+   */
+  isTokenExpiringSoon(bufferMinutes = 5) {
+    if (!this.tokenExpiryTime) return false;
+    const now = Date.now();
+    const bufferTime = bufferMinutes * 60 * 1000;
+    return now >= (this.tokenExpiryTime - bufferTime);
+  }
+
+  /**
    * Refresh Firebase token from backend
    */
   async refreshFirebaseToken() {
     try {
-      const response = await apiClient.verifySession();
-      if (response.valid && response.firebaseToken) {
+      const response = await apiClient.refreshFirebaseToken();
+      if (response && response.firebaseToken) {
         console.log('Got fresh Firebase token from backend');
         await this.authenticate(response.firebaseToken);
+        return true;
       } else {
-        console.error('Session invalid, redirecting to login...');
-        window.location.href = 'login.html';
+        console.error('No Firebase token in refresh response');
+        throw new Error('No Firebase token received');
       }
     } catch (error) {
       console.error('Failed to refresh Firebase token:', error);
+      
+      // If refresh fails, try verify session as fallback
+      try {
+        const verifyResponse = await apiClient.verifySession();
+        if (verifyResponse.valid && verifyResponse.firebaseToken) {
+          console.log('Got fresh Firebase token from verify session fallback');
+          await this.authenticate(verifyResponse.firebaseToken);
+          return true;
+        }
+      } catch (fallbackError) {
+        console.error('Fallback verify session also failed:', fallbackError);
+      }
+      
+      // Both refresh and fallback failed - redirect to login
+      console.error('All token refresh attempts failed, redirecting to login...');
       window.location.href = 'login.html';
+      return false;
     }
   }
 
@@ -213,10 +270,18 @@ class FirebaseAuthManager {
    */
   async signOut() {
     try {
+      // Clear timers
+      if (this.refreshTimer) {
+        clearTimeout(this.refreshTimer);
+        this.refreshTimer = null;
+      }
+      
       await firebase.auth().signOut();
       this.clearStoredFirebaseToken();
       this.isAuthenticated = false;
       this.currentUser = null;
+      this.tokenIssuedAt = null;
+      this.tokenExpiryTime = null;
     } catch (error) {
       console.error('Firebase sign out error:', error);
     }

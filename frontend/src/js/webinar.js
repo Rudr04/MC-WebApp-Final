@@ -63,7 +63,6 @@ class WebinarApp {
       await streamPlayer.initialize();
       chatManager.initialize(this.user, this.uiPermissions);
       
-      
       // Set up event listeners (after UI injection)
       this.setupEventListeners();
       
@@ -125,16 +124,16 @@ class WebinarApp {
     
     // Inject end session button for hosts only
     if (this.uiPermissions.canEndSession) {
-      const messageInputContainer = document.querySelector('.message-input-container');
+      console.log('Injecting end session button for host...');
+      const headerActions = document.querySelector('.header-actions');
       
       const endSessionBtnHTML = `
-        <button class="end-btn" id="endSessionBtn">
-          <i class="fas fa-power-off"></i>
-          End
+        <button class="end-btn header-btn" id="endSessionBtn">
+          <i class="fas fa-power-off"></i> End
         </button>
       `;
       
-      messageInputContainer.insertAdjacentHTML('beforeend', endSessionBtnHTML);
+      headerActions.insertAdjacentHTML('beforeend', endSessionBtnHTML);
       console.log('End session button injected');
     }
     
@@ -173,28 +172,64 @@ class WebinarApp {
     document.getElementById('qualityBtn').addEventListener('click', () => 
       streamPlayer.showNotification('Quality settings coming soon', 'warning')
     );
+    // Prevent tabbing into YouTube player
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+            const activeElement = document.activeElement;
+            const playerContainer = document.getElementById('playerContainer');
+            
+            // Check if focus is about to enter the player area
+            if (playerContainer && playerContainer.contains(activeElement)) {
+                e.preventDefault();
+                
+                // Move focus to the next logical element (chat input)
+                const messageInput = document.getElementById('messageInput');
+                if (messageInput) {
+                    messageInput.focus();
+                }
+            }
+        }
+    });
     
     // Chat
-    document.getElementById('messageInput').addEventListener('keypress', (e) => {
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    
+    messageInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         chatManager.sendMessage();
       }
     });
     
-    // Send button
-    document.querySelector('.send-btn').addEventListener('click', () => chatManager.sendMessage());
+    // Auto-resize textarea and show/hide send button
+    messageInput.addEventListener('input', (e) => {
+      // Show/hide send button
+      sendBtn.style.display = e.target.value.trim() ? 'flex' : 'none';
+      
+      // Auto-resize
+      e.target.style.height = 'auto';
+      e.target.style.height = e.target.scrollHeight + 'px';
+    });
     
-    // Exit button
-    document.querySelector('.exit-btn').addEventListener('click', () => this.logout());
+    // Send button (inline) - event listener
+    if (sendBtn) {
+      sendBtn.addEventListener('click', () => chatManager.sendMessage());
+    }
+    
+    // Exit button (header)
+    const exitBtn = document.getElementById('exitBtn');
+    if (exitBtn) {
+      exitBtn.addEventListener('click', () => this.handleExit());
+    }
     
     // Fullscreen changes
     document.addEventListener('fullscreenchange', this.updateFullscreenButton);
     document.addEventListener('webkitfullscreenchange', this.updateFullscreenButton);
     
     // Network status
-    addEventListener('online', () => this.updateConnectionStatus('connected'));
-    addEventListener('offline', () => this.updateConnectionStatus('disconnected'));
+    // addEventListener('online', () => this.updateConnectionStatus('connected'));
+    // addEventListener('offline', () => this.updateConnectionStatus('disconnected'));
     
     // Visibility tracking
     document.addEventListener('visibilitychange', () => {
@@ -202,6 +237,14 @@ class WebinarApp {
         this.updateSessionState('background', 'visibility');
       } else {
         this.updateSessionState('active', 'visibility');
+        
+        // Check if Firebase token expired while tab was hidden
+        if (window.firebaseAuthManager && window.firebaseAuthManager.isTokenExpiringSoon(5)) {
+            console.log('Firebase token expired/expiring while tab was hidden, refreshing...');
+            window.firebaseAuthManager.refreshFirebaseToken().catch(error => {
+            console.error('Failed to refresh expired token on tab focus:', error);
+          });
+        }
       }
     });
 
@@ -216,9 +259,6 @@ class WebinarApp {
       } else {
         console.warn('Exit beacon failed to send');
       }
-      
-      e.preventDefault();
-      e.returnValue = 'Are you sure you want to leave?';
     });
   }
 
@@ -266,6 +306,19 @@ class WebinarApp {
     });
   }
 
+  async handleExit() {
+    // Show confirmation modal for manual exit
+    const confirmed = await ConfirmModal.confirm('Leave the session?', {
+      title: 'Exit Session',
+      confirmText: 'Leave',
+      cancelText: 'Stay'
+    });
+    
+    if (confirmed) {
+      this.logout();
+    }
+  }
+
   async logout() {
     try {
       // Cleanup managers before logout
@@ -307,7 +360,12 @@ class WebinarApp {
       return;
     }
     
-    if (!confirm('End session for all participants?')) return;
+    if (!await ConfirmModal.countdownConfirm('End session for all participants?', {
+      title: '  End Session',
+      confirmText: 'End Session',
+      cancelText: 'Cancel',
+      countdownSeconds: 3
+    })) return;
     
     try {
       console.log('Calling API to end session...');

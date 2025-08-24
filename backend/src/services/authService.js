@@ -128,10 +128,15 @@ class AuthService {
       throw new Error('Name not found in whitelist. Please contact administrator.');
     }
 
-    // Check if already in session
-    const activeSession = await db.ref(`${FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS}/${phone}`).once('value');
-    if (activeSession.exists()) {
-      throw new Error(MESSAGES.ERROR.ALREADY_IN_SESSION);
+    // Check if user is already in an active session (not offline)
+    const userSession = await db.ref(`${FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS}/${phone}`).once('value');
+    if (userSession.exists()) {
+      const userData = userSession.val();
+      // Allow login only if user is offline
+      if (userData.state !== 'offline') {
+        throw new Error(MESSAGES.ERROR.ALREADY_IN_SESSION);
+      }
+      logger.info(`User ${phone} was offline, allowing re-login`);
     }
 
     // Check if any host is active
@@ -152,8 +157,9 @@ class AuthService {
     await db.ref().transaction((current) => {
       if (current === null) current = {};
       
-      // Double-check session doesn't exist (race condition protection)
-      if (current[FIREBASE_PATHS.ACTIVE_USERS] && current[FIREBASE_PATHS.ACTIVE_USERS].participants && current[FIREBASE_PATHS.ACTIVE_USERS].participants[phone]) {
+      // Double-check session doesn't exist or is offline (race condition protection)
+      const existingParticipant = current[FIREBASE_PATHS.ACTIVE_USERS] && current[FIREBASE_PATHS.ACTIVE_USERS].participants && current[FIREBASE_PATHS.ACTIVE_USERS].participants[phone];
+      if (existingParticipant && existingParticipant.state !== 'offline') {
         throw new Error(MESSAGES.ERROR.ALREADY_IN_SESSION);
       }
       

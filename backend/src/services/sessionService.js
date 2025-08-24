@@ -7,9 +7,112 @@ class SessionService {
     // Start cleanup jobs
     this.startCleanupJobs();
   }
+
+  // Helper methods for indexed queries
+  async getUsersByState(userType, state) {
+    logger.debug(`Querying ${userType} with state: ${state}`);
+    const snapshot = await db.ref(`${FIREBASE_PATHS.ACTIVE_USERS}/${userType}`)
+      .orderByChild('state')
+      .equalTo(state)
+      .once('value');
+    return snapshot;
+  }
+
+  async getUsersByStateOlderThan(userType, state, timestamp) {
+    logger.debug(`Querying ${userType} with state '${state}' older than ${timestamp}`);
+    const snapshot = await db.ref(`${FIREBASE_PATHS.ACTIVE_USERS}/${userType}`)
+      .orderByChild('state')
+      .equalTo(state)
+      .once('value');
+    
+    // Client-side filtering for timestamp since Firebase doesn't support compound queries
+    const filteredResults = {};
+    snapshot.forEach(child => {
+      const userData = child.val();
+      if (userData.stateUpdatedAt <= timestamp) {
+        filteredResults[child.key] = userData;
+      }
+    });
+    return filteredResults;
+  }
+
+  async getRecentlyActiveUsers(userType, sinceTimestamp) {
+    logger.debug(`Querying ${userType} with lastSeen since: ${sinceTimestamp}`);
+    const snapshot = await db.ref(`${FIREBASE_PATHS.ACTIVE_USERS}/${userType}`)
+      .orderByChild('lastSeen')
+      .startAt(sinceTimestamp)
+      .once('value');
+    return snapshot;
+  }
+
+  async getUsersBySource(userType, source) {
+    logger.debug(`Querying ${userType} with stateSource: ${source}`);
+    const snapshot = await db.ref(`${FIREBASE_PATHS.ACTIVE_USERS}/${userType}`)
+      .orderByChild('stateSource')
+      .equalTo(source)
+      .once('value');
+    return snapshot;
+  }
+
+  async getActiveUsers(userType) {
+    return this.getUsersByState(userType, 'active');
+  }
+
+  async getOfflineUsers(userType) {
+    return this.getUsersByState(userType, 'offline');
+  }
+
+  /**
+   * Internal method for cleanup jobs - handles bulk user state updates
+   * Uses scoped transaction to avoid conflicts with real-time updates
+   */
+  async updateUserStateInTransaction(userType, userId, state, source) {
+    // Check if user exists first (cleanup jobs only update existing users)
+    const userSnapshot = await db.ref(`activeUsers/${userType}/${userId}`).once('value');
+    if (!userSnapshot.exists()) {
+      logger.debug(`Cleanup: User ${userId} not found, skipping`);
+      return;
+    }
+    
+    // Use the same scoped transaction approach as real-time updates
+    let transactionAttempt = 0;
+    let previousState = null;
+    
+    await db.ref(`activeUsers/${userType}/${userId}`).transaction((userData) => {
+      transactionAttempt++;
+      
+      // Capture the current state only from transaction attempts that have actual user data
+      if (userData && previousState === null) {
+        previousState = userData.state;
+        logger.info(`Cleanup: Setting ${userId} from ${previousState || 'none'} to ${state} (attempt #${transactionAttempt})`);
+      } else if (transactionAttempt === 1 && !userData) {
+        logger.info(`Cleanup transaction attempt #1 has no data for ${userId} - will capture state from subsequent attempt with data`);
+      }
+      
+      if (!userData) {
+        // User was deleted between check and transaction
+        return null;
+      }
+      
+      // Update user state - preserve existing data  
+      const updatedData = {
+        ...userData,
+        state: state,
+        stateUpdatedAt: Date.now(),
+        stateSource: source,
+        lastSeen: Date.now()
+      };
+      
+      return updatedData;
+    });
+    
+    // Handle counter updates separately (same as real-time method)
+    await this.updateCounterForStateChange(userType, userId, previousState, state, source);
+  }
   async getActiveSessionsCount() {
-    const snapshot = await db.ref(FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS).once('value');
-    return snapshot.numChildren();
+    // Use counter for better performance instead of querying all participants
+    const snapshot = await db.ref(FIREBASE_PATHS.ACTIVE_USERS_COUNTS_PARTICIPANTS).once('value');
+    return snapshot.val() || 0;
   }
 
   async hasActiveHostSession() {
@@ -49,69 +152,108 @@ class SessionService {
     
     logger.info(`Updating user state: ${userId} (${userType}) to '${state}' from '${source}'`);
     
-    await db.ref().transaction((data) => {
-      if (!data) data = {};
+    // Use most specific transaction scope - target exact user path to avoid conflicts
+    let transactionAttempt = 0;
+    let previousState = null;
+    
+    await db.ref(`activeUsers/${userType}/${userId}`).transaction((userData) => {
+      transactionAttempt++;
       
-      // Initialize paths
-      if (!data.activeUsers) data.activeUsers = {};
-      if (!data.activeUsers[userType]) data.activeUsers[userType] = {};
-      if (!data.activeUsers.counts) data.activeUsers.counts = {};
-      if (!data.activeUsers.counts[userType]) data.activeUsers.counts[userType] = 0;
+      logger.info(`Transaction attempt #${transactionAttempt} for ${userId}: user data exists = ${!!userData}, data: ${JSON.stringify(userData || 'none')}`);
       
-      const currentUser = data.activeUsers[userType][userId];
-      const currentState = currentUser?.state;
+      // Capture the current state only from transaction attempts that have actual user data
+      if (userData && previousState === null) {
+        previousState = userData.state;
+        logger.info(`Current state for user ${userId}: ${previousState || 'none'} from updateUserState (attempt #${transactionAttempt})`);
+      } else if (transactionAttempt === 1 && !userData) {
+        logger.info(`Transaction attempt #1 has no data for ${userId} - will capture state from subsequent attempt with data`);
+      }
       
-      // Update user state
-      data.activeUsers[userType][userId] = {
+      // Update user state - preserve existing data
+      const updatedData = {
+        ...(userData || {}),
         state: state,
         stateUpdatedAt: Date.now(),
         stateSource: source,
         lastSeen: Date.now()
       };
       
-      // Counter represents connected users (regardless of tab visibility)
-      // Connected states: active, background, closing
-      // Disconnected state: offline
-      
-      const connectedStates = ['active', 'background', 'closing'];
-      const wasConnected = currentState && connectedStates.includes(currentState);
-      const isNowConnected = connectedStates.includes(state);
-      
-      let counterChange = null;
-      let changeReason = null;
-      
-      // Only modify counter for true connection/disconnection events
-      if (!wasConnected && isNowConnected) {
-        // User connecting: offline → connected state
-        // Check source to ensure this is a legitimate connection
-        if (['login', 'connection', 'verifySession','visibility'].includes(source)) {
-          data.activeUsers.counts[userType] = (data.activeUsers.counts[userType] || 0) + 1;
-          counterChange = '+1';
-          changeReason = `${currentState || 'unknown'} → ${state} via ${source}`;
-        } else {
-          changeReason = `${currentState || 'unknown'} → ${state} via ${source} (source not allowed for increment)`;
-        }
-      } else if (wasConnected && !isNowConnected) {
-        // User disconnecting: connected state → offline
-        data.activeUsers.counts[userType] = Math.max(0, (data.activeUsers.counts[userType] || 0) - 1);
-        counterChange = '-1';
-        changeReason = `${currentState} → ${state} via ${source}`;
-      } else {
-        // State change within connected states or no real change
-        changeReason = `${currentState || 'unknown'} → ${state} via ${source} (no counter change needed)`;
-      }
-      
-      // Log counter changes for debugging
-      if (counterChange) {
-        logger.info(`Counter changed ${counterChange} for ${userType}: ${changeReason}. New count: ${data.activeUsers.counts[userType]}`);
-      } else {
-        logger.debug(`Counter unchanged for ${userType}: ${changeReason}`);
-      }
-      
-      return data;
+      return updatedData;
     });
+    
+    // Handle counter updates separately to avoid transaction conflicts
+    await this.updateCounterForStateChange(userType, userId, previousState, state, source);
   }
 
+  async updateCounterForStateChange(userType, userId, currentState, newState, source) {
+    // Counter represents connected users (regardless of tab visibility)
+    // Connected states: active, background, closing
+    // Disconnected state: offline
+    
+    const connectedStates = ['active', 'background', 'closing'];
+    const wasConnected = currentState && connectedStates.includes(currentState);
+    const isNowConnected = connectedStates.includes(newState);
+    
+    let counterChange = null;
+    let changeReason = null;
+    
+    // Only modify counter for true connection/disconnection events
+    if (!wasConnected && isNowConnected) {
+      // User connecting: offline → connected state
+      // Check source to ensure this is a legitimate connection
+      const validConnectSources = ['login', 'connection', 'verifySession', 'visibility'];
+      if (validConnectSources.includes(source)) {
+        await db.ref(`activeUsers/counts/${userType}`).transaction((count) => {
+          return (count || 0) + 1;
+        });
+        counterChange = '+1';
+        changeReason = `${currentState || 'unknown'} → ${newState} via ${source}`;
+        
+        // Special logging for visibility-based increments (should be rare after offline cleanup)
+        if (source === 'visibility' && (currentState === 'undefined' || !currentState)) {
+          logger.info(`👁️ VISIBILITY INCREMENT: ${userType} counter +1 for user ${userId}: ${currentState || 'unknown'} → ${newState} (likely after cleanup)`);
+        }
+      } else {
+        changeReason = `${currentState || 'unknown'} → ${newState} via ${source} (INVALID CONNECT SOURCE - NO INCREMENT)`;
+        logger.warn(`❌ Invalid connect source '${source}' for user ${userId} - counter NOT incremented`);
+      }
+    } else if (wasConnected && !isNowConnected) {
+      // User disconnecting: connected state → offline
+      // Verify this is a legitimate disconnection source
+      const validDisconnectSources = ['cleanup_job', 'beacon', 'disconnection', 'connection'];
+      if (validDisconnectSources.includes(source)) {
+        await db.ref(`activeUsers/counts/${userType}`).transaction((count) => {
+          return Math.max(0, (count || 0) - 1);
+        });
+        counterChange = '-1';
+        changeReason = `${currentState} → ${newState} via ${source}`;
+        
+        // Special logging for cleanup jobs to track their decrements
+        if (source === 'cleanup_job') {
+          logger.info(`🧹 CLEANUP DECREMENT: ${userType} counter -1 for user ${userId}: ${currentState} → ${newState}`);
+        }
+      } else {
+        changeReason = `${currentState} → ${newState} via ${source} (INVALID DISCONNECT SOURCE - NO DECREMENT)`;
+        logger.warn(`❌ Invalid disconnect source '${source}' for user ${userId} - counter NOT decremented`);
+      }
+    } else {
+      // State change within connected states or no real change
+      changeReason = `${currentState || 'unknown'} → ${newState} via ${source} (no counter change needed)`;
+    }
+    
+    // Log counter changes for debugging
+    if (counterChange) {
+      const newCount = (await db.ref(`activeUsers/counts/${userType}`).once('value')).val() || 0;
+      logger.info(`Counter changed ${counterChange} for ${userType}: ${changeReason}. New count: ${newCount}`);
+    } else {
+      logger.debug(`Counter unchanged for ${userType}: ${changeReason}`);
+    }
+  }
+
+  /**
+   * Update user state when you only have userId (used by beacon/disconnect monitoring)
+   * Determines user type automatically and uses scoped transactions
+   */
   async updateUserStateByUserId(userId, state, source) {
     logger.info(`Updating user state by ID: ${userId} to '${state}' from '${source}'`);
     
@@ -129,63 +271,40 @@ class SessionService {
       return;
     }
     
-    await db.ref().transaction((data) => {
-      if (!data) data = {};
+    // Use the same scoped transaction approach as other methods
+    let transactionAttempt = 0;
+    let previousState = null;
+    
+    await db.ref(`activeUsers/${userType}/${userId}`).transaction((userData) => {
+      transactionAttempt++;
       
-      // Initialize paths
-      if (!data.activeUsers) data.activeUsers = {};
-      if (!data.activeUsers[userType]) data.activeUsers[userType] = {};
-      if (!data.activeUsers.counts) data.activeUsers.counts = {};
-      if (!data.activeUsers.counts[userType]) data.activeUsers.counts[userType] = 0;
-      
-      const currentUser = data.activeUsers[userType][userId];
-      const currentState = currentUser?.state;
-      
-      if (currentUser) {
-        // Update user state
-        data.activeUsers[userType][userId] = {
-          state: state,
-          stateUpdatedAt: Date.now(),
-          stateSource: source,
-          lastSeen: Date.now()
-        };
-        
-        // Apply same counter logic as updateUserState method
-        const connectedStates = ['active', 'background', 'closing'];
-        const wasConnected = currentState && connectedStates.includes(currentState);
-        const isNowConnected = connectedStates.includes(state);
-        
-        let counterChange = null;
-        let changeReason = null;
-        
-        if (!wasConnected && isNowConnected) {
-          // User connecting: offline → connected state
-          if (['login', 'connection', 'verifySession'].includes(source)) {
-            data.activeUsers.counts[userType] = (data.activeUsers.counts[userType] || 0) + 1;
-            counterChange = '+1';
-            changeReason = `${currentState || 'unknown'} → ${state} via ${source}`;
-          } else {
-            changeReason = `${currentState || 'unknown'} → ${state} via ${source} (source not allowed for increment)`;
-          }
-        } else if (wasConnected && !isNowConnected) {
-          // User disconnecting: connected state → offline
-          data.activeUsers.counts[userType] = Math.max(0, (data.activeUsers.counts[userType] || 0) - 1);
-          counterChange = '-1';
-          changeReason = `${currentState} → ${state} via ${source}`;
-        } else {
-          changeReason = `${currentState || 'unknown'} → ${state} via ${source} (no counter change needed)`;
-        }
-        
-        // Log counter changes
-        if (counterChange) {
-          logger.info(`Counter changed ${counterChange} for ${userType}: ${changeReason}. New count: ${data.activeUsers.counts[userType]}`);
-        } else {
-          logger.debug(`Counter unchanged for ${userType}: ${changeReason}`);
-        }
+      // Capture the current state only from transaction attempts that have actual user data
+      if (userData && previousState === null) {
+        previousState = userData.state;
+        logger.info(`Current state for user ${userId}: ${previousState || 'none'} from updateUserStateByUserId (attempt #${transactionAttempt})`);
+      } else if (transactionAttempt === 1 && !userData) {
+        logger.info(`updateUserStateByUserId transaction attempt #1 has no data for ${userId} - will capture state from subsequent attempt with data`);
       }
       
-      return data;
+      if (!userData) {
+        // User was deleted
+        return null;
+      }
+      
+      // Update user state - preserve existing data
+      const updatedData = {
+        ...userData,
+        state: state,
+        stateUpdatedAt: Date.now(),
+        stateSource: source,
+        lastSeen: Date.now()
+      };
+      
+      return updatedData;
     });
+    
+    // Handle counter updates separately
+    await this.updateCounterForStateChange(userType, userId, previousState, state, source);
   }
 
   startCleanupJobs() {
@@ -211,57 +330,27 @@ class SessionService {
       let totalCleaned = 0;
       
       for (const userType of userTypes) {
-        const usersRef = db.ref(`${FIREBASE_PATHS.ACTIVE_USERS}/${userType}`);
-        const snapshot = await usersRef.once('value');
-        const users = snapshot.val() || {};
+        // Use indexed query to get only 'closing' state users
+        const snapshot = await this.getUsersByState(userType, 'closing');
         
         const now = Date.now();
         const fiveMinutes = 2 * 60 * 1000;
         
-        for (const userId in users) {
-          const user = users[userId];
-          if (user && user.state === 'closing') {
+        snapshot.forEach(child => {
+          const userId = child.key;
+          const user = child.val();
+          
+          if (user) {
             const closingTime = now - user.stateUpdatedAt;
             if (closingTime >= fiveMinutes) {
               logger.info(`Cleaning up ${userType.slice(0, -1)} ${userId} (closing for ${Math.round(closingTime/60000)} minutes)`);
               
-              await db.ref().transaction((data) => {
-                if (!data) data = {};
-                
-                // Initialize paths
-                if (!data.activeUsers) data.activeUsers = {};
-                if (!data.activeUsers[userType]) data.activeUsers[userType] = {};
-                if (!data.activeUsers.counts) data.activeUsers.counts = {};
-                if (!data.activeUsers.counts[userType]) data.activeUsers.counts[userType] = 0;
-                
-                const currentUser = data.activeUsers[userType][userId];
-                const currentState = currentUser?.state;
-                
-                if (currentUser && currentState === 'closing') {
-                  // Update user state to offline
-                  data.activeUsers[userType][userId] = {
-                    state: 'offline',
-                    stateUpdatedAt: Date.now(),
-                    stateSource: 'cleanup_job',
-                    lastSeen: Date.now()
-                  };
-                  
-                  // Decrement counter (cleanup job always moves from connected state to offline)
-                  const connectedStates = ['active', 'background', 'closing'];
-                  if (connectedStates.includes(currentState)) {
-                    const oldCount = data.activeUsers.counts[userType] || 0;
-                    data.activeUsers.counts[userType] = Math.max(0, oldCount - 1);
-                    logger.info(`Counter changed -1 for ${userType}: ${currentState} → offline via cleanup_job. New count: ${data.activeUsers.counts[userType]}`);
-                  }
-                }
-                
-                return data;
-              });
-              
+              // Update user state using transaction
+              this.updateUserStateInTransaction(userType, userId, 'offline', 'cleanup_job');
               totalCleaned++;
             }
           }
-        }
+        });
       }
       
       if (totalCleaned > 0) {
@@ -276,58 +365,28 @@ class SessionService {
     try {
       logger.info('Running background participants cleanup job');
       
-      const participantsRef = db.ref(FIREBASE_PATHS.ACTIVE_USERS_PARTICIPANTS);
-      const snapshot = await participantsRef.once('value');
-      const participants = snapshot.val() || {};
+      // Use indexed query to get only 'background' state participants
+      const snapshot = await this.getUsersByState('participants', 'background');
       
       const now = Date.now();
       const thirtyMinutes = 30 * 60 * 1000;
       let cleanedCount = 0;
       
-      for (const userId in participants) {
-        const user = participants[userId];
-        if (user && user.state === 'background') {
+      snapshot.forEach(child => {
+        const userId = child.key;
+        const user = child.val();
+        
+        if (user) {
           const backgroundTime = now - user.stateUpdatedAt;
           if (backgroundTime >= thirtyMinutes) {
             logger.info(`Cleaning up participant ${userId} (background for ${Math.round(backgroundTime/60000)} minutes)`);
             
-            await db.ref().transaction((data) => {
-              if (!data) data = {};
-              
-              // Initialize paths
-              if (!data.activeUsers) data.activeUsers = {};
-              if (!data.activeUsers.participants) data.activeUsers.participants = {};
-              if (!data.activeUsers.counts) data.activeUsers.counts = {};
-              if (!data.activeUsers.counts.participants) data.activeUsers.counts.participants = 0;
-              
-              const currentUser = data.activeUsers.participants[userId];
-              const currentState = currentUser?.state;
-              
-              if (currentUser && currentState === 'background') {
-                // Update user state to offline
-                data.activeUsers.participants[userId] = {
-                  state: 'offline',
-                  stateUpdatedAt: Date.now(),
-                  stateSource: 'cleanup_job',
-                  lastSeen: Date.now()
-                };
-                
-                // Decrement counter (background → offline)
-                const connectedStates = ['active', 'background', 'closing'];
-                if (connectedStates.includes(currentState)) {
-                  const oldCount = data.activeUsers.counts.participants || 0;
-                  data.activeUsers.counts.participants = Math.max(0, oldCount - 1);
-                  logger.info(`Counter changed -1 for participants: ${currentState} → offline via cleanup_job. New count: ${data.activeUsers.counts.participants}`);
-                }
-              }
-              
-              return data;
-            });
-            
+            // Update user state using transaction
+            this.updateUserStateInTransaction('participants', userId, 'offline', 'cleanup_job');
             cleanedCount++;
           }
         }
-      }
+      });
       
       if (cleanedCount > 0) {
         logger.info(`Background participants cleanup completed: ${cleanedCount} participants set offline`);

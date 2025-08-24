@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "description": "Secure frontend for webinar platform",
   "scripts": {
-    "start": "live-server --port=3000 --host=localhost",
-    "dev": "live-server  --port=3000 --host=localhost"
+    "start": "serve -s src -p 8080",
+    "dev": "live-server --port=3000 --host=localhost",
+    "build": "echo 'Static files - no build required'",
+    "serve": "serve -s src -p 8080"
   },
   "devDependencies": {
-    "live-server": "^1.2.0"
+    "live-server": "^1.2.0",
+    "serve": "^14.2.1"
   }
 }
